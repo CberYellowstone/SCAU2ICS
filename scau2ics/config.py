@@ -27,6 +27,10 @@ SEMESTERS = [
     {"value": "2024-02-26", "label": "2023-2024-2"},
 ]
 
+# 加密配置
+ENCRYPTION_SALT = "SCAU2ICS_SALT_FOR_SECURE_URLS"  # 用于URL加密的盐值
+URL_EXPIRE_DAYS = 30  # URL有效期（天）
+
 # 日志配置
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

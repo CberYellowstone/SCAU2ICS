@@ -77,10 +77,24 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 16px;
+            margin-right: 8px;
         }
 
         button:hover {
             background-color: #45a049;
+        }
+
+        .button-secondary {
+            background-color: #3498db;
+        }
+
+        .button-secondary:hover {
+            background-color: #2980b9;
+        }
+
+        .button-container {
+            display: flex;
+            gap: 10px;
         }
 
         .api-doc {
@@ -90,6 +104,49 @@
         .night-warning {
             color: #ff6600;
             font-weight: bold;
+        }
+
+        .url-result {
+            display: none;
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e8f5e9;
+            border-radius: 4px;
+            border: 1px solid #c8e6c9;
+        }
+
+        .url-box {
+            display: flex;
+            margin-top: 10px;
+        }
+
+        .url-input {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+            font-size: 14px;
+        }
+
+        .copy-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            padding: 0 15px;
+            cursor: pointer;
+        }
+
+        .copy-btn:hover {
+            background-color: #45a049;
+        }
+
+        .success-message {
+            color: #4CAF50;
+            margin-top: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            display: none;
         }
     </style>
 </head>
@@ -131,8 +188,20 @@
                     </select>
                 </div>
 
-                <button type="button" onclick="submitForm()">生成并下载ICS日历</button>
+                <div class="button-container">
+                    <button type="button" onclick="submitForm()">生成并下载ICS日历</button>
+                    <button type="button" class="button-secondary" onclick="generateShareableUrl()">生成分享链接</button>
+                    </div>
             </form>
+<!-- 分享链接结果 -->
+<div id="urlResult" class="url-result">
+    <p>以下是您的共享链接，有效期为<b>30天</b>。任何人都可以通过此链接直接下载您的课表日历，<b>无需再次输入密码</b>。请妥善保管此链接。</p>
+    <div class="url-box">
+        <input type="text" id="shareableUrl" class="url-input" readonly>
+        <button class="copy-btn" onclick="copyUrl()">复制</button>
+    </div>
+    <p id="copySuccess" class="success-message">复制成功!</p>
+</div>
         </div>
 
         <div class="card api-doc">
@@ -149,6 +218,9 @@
                 </pre>
             <p>其中 <code>sso_password</code> 是可选的，但在0点至7点之间需要提供。</p>
             <p><code>first_monday_date</code> 是开学第一周的周一日期，格式为YYYY-MM-DD</p>
+<h3>生成共享链接</h3>
+<p>使用POST请求访问 <code>/generate_url</code> 接口生成加密链接，请求格式与上面相同。</p>
+<p>返回的链接可以通过GET请求直接访问，无需再次输入密码。链接有效期为30天。</p>
         </div>
     </div>
 
@@ -192,6 +264,61 @@
                     alert('生成ICS失败: ' + error.message);
                 });
         }
+
+    function generateShareableUrl() {
+        // 隐藏之前的结果（如果有）
+        document.getElementById('urlResult').style.display = 'none';
+        document.getElementById('copySuccess').style.display = 'none';
+
+        const form = document.getElementById('icsForm');
+        const formData = new FormData(form);
+        const jsonData = {};
+        formData.forEach((value, key) => {
+            jsonData[key] = value;
+        });
+
+        // 验证必填字段
+        if (!jsonData.userCode || !jsonData.jwxt_password || !jsonData.first_monday_date) {
+            alert('请填写所有必需的字段（学号、教务系统密码和开学日期）');
+            return;
+        }
+
+        fetch('/generate_url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(jsonData)
+        })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text) });
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('shareableUrl').value = data.url;
+                document.getElementById('urlResult').style.display = 'block';
+            })
+            .catch(error => {
+                alert('生成分享链接失败: ' + error.message);
+            });
+    }
+
+    function copyUrl() {
+        const urlInput = document.getElementById('shareableUrl');
+        urlInput.select();
+        document.execCommand('copy');
+
+        // 显示成功消息
+        const successMsg = document.getElementById('copySuccess');
+        successMsg.style.display = 'block';
+
+        // 3秒后隐藏成功消息
+        setTimeout(() => {
+            successMsg.style.display = 'none';
+        }, 3000);
+    }
     </script>
 </body>
 
