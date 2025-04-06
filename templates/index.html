@@ -148,6 +148,63 @@
             font-weight: bold;
             display: none;
         }
+
+        /* 功能标签页样式 */
+        .function-tabs {
+            display: flex;
+            margin-top: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .function-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #f5f5f5;
+            border-radius: 4px 4px 0 0;
+            margin-right: 5px;
+            transition: all 0.2s ease;
+        }
+        
+        .function-tab:hover {
+            background-color: #e0f2e1;
+        }
+        
+        .function-tab.active {
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .function-content {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        .function-content.active {
+            display: block;
+        }
+        
+        .info {
+            background-color: #e8f5e9;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border: 1px solid #c8e6c9;
+        }
+        
+        #configResult {
+            background-color: #e8f5e9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            border: 1px solid #c8e6c9;
+            display: none;
+        }
+        
+        #configResult span {
+            font-family: monospace;
+            word-break: break-all;
+        }
     </style>
 </head>
 
@@ -156,8 +213,10 @@
 
     <div class="container">
         <div class="card">
-            <h2>生成我的课表日历</h2>
-            <form id="icsForm" action="/generate_ics" method="post">
+            <h2>输入你的基本信息</h2>
+            
+            <!-- 共用参数输入表单 -->
+            <div id="commonForm">
                 <div class="form-group">
                     <label for="userCode">学号:</label>
                     <input type="text" id="userCode" name="userCode" required>
@@ -174,34 +233,69 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="first_monday_date">开学第一周的周一日期:</label>
-                    <input type="date" id="first_monday_date" name="first_monday_date" required
-                        value="{{ SEMESTERS[0]['value'] }}">
-                </div>
-
-                <div class="form-group">
-                    <label for="semester">学期选择:</label>
-                    <select id="semester" onchange="updateFirstMonday()">
+                    <label for="semester_select">学期选择:</label>
+                    <select id="semester_select">
                         {%- for semester in SEMESTERS %}
-                        <option value="{{ semester['value'] }}">{{ semester['label'] }}</option>
+                        <option value="{{ semester['label'] }}">{{ semester['label'] }}</option>
                         {%- endfor %}
+                    </select>
+                    <input type="hidden" id="semester" name="semester" value="{{ SEMESTERS[0]['label'] }}">
+                </div>
+            </div>
+            
+            <!-- 功能切换标签 -->
+            <div class="function-tabs">
+                <div class="function-tab active" data-tab="ics-functions">📅 ICS 课表生成</div>
+                <div class="function-tab" data-tab="caldav-functions">🔄 CalDAV 配置</div>
+            </div>
+            
+            <!-- ICS 课表生成功能 -->
+            <div id="ics-functions" class="function-content active">
+                <div class="form-group">
+                    <label for="expire_days">链接有效期:</label>
+                    <select id="expire_days" name="expire_days">
+                        <option value="{{ URL_EXPIRE_DAYS }}">默认 ({{ URL_EXPIRE_DAYS }}天)</option>
+                        <option value="1">1天</option>
+                        <option value="7">7天</option>
+                        <option value="30">30天</option>
+                        <option value="90">90天</option>
+                        <option value="365">1年</option>
+                        <option value="0">永不过期</option>
                     </select>
                 </div>
 
                 <div class="button-container">
-                    <button type="button" onclick="submitForm()">生成并下载ICS日历</button>
+                    <button type="button" onclick="downloadICS()">生成并下载ICS日历</button>
                     <button type="button" class="button-secondary" onclick="generateShareableUrl()">生成分享链接</button>
+                </div>
+                
+                <!-- 分享链接结果 -->
+                <div id="urlResult" class="url-result">
+                    <p>以下是您的共享链接，有效期为<b>30天</b>。任何人都可以通过此链接直接下载您的课表日历，<b>无需再次输入密码</b>。请妥善保管此链接。</p>
+                    <div class="url-box">
+                        <input type="text" id="shareableUrl" class="url-input" readonly>
+                        <button class="copy-btn" onclick="copyUrl()">复制</button>
                     </div>
-            </form>
-<!-- 分享链接结果 -->
-<div id="urlResult" class="url-result">
-    <p>以下是您的共享链接，有效期为<b>30天</b>。任何人都可以通过此链接直接下载您的课表日历，<b>无需再次输入密码</b>。请妥善保管此链接。</p>
-    <div class="url-box">
-        <input type="text" id="shareableUrl" class="url-input" readonly>
-        <button class="copy-btn" onclick="copyUrl()">复制</button>
-    </div>
-    <p id="copySuccess" class="success-message">复制成功!</p>
-</div>
+                    <p id="copySuccess" class="success-message">复制成功!</p>
+                </div>
+            </div>
+            
+            <!-- CalDAV 配置功能 -->
+            <div id="caldav-functions" class="function-content">
+                <div class="info">
+                    <p>CalDAV 功能允许您将华农课表直接同步到手机、电脑等设备的日历应用中，实时查看课程安排。</p>
+                </div>
+                
+                <button type="button" onclick="generateCalDAVConfig()">生成 CalDAV 配置</button>
+                
+                <div id="configResult">
+                    <h3>您的 CalDAV 配置信息</h3>
+                    <p><strong>服务器地址：</strong> <span id="caldav_url"></span></p>
+                    <p><strong>用户名：</strong> <span id="username"></span></p>
+                    <p><strong>密码：</strong> <span id="password"></span></p>
+                    <p>请使用上述信息在您的日历应用中配置 CalDAV 账户。</p>
+                </div>
+            </div>
         </div>
 
         <div class="card api-doc">
@@ -213,83 +307,126 @@
     "userCode": "2023XXXXXXXX",
     "jwxt_password": "教务系统密码",
     "sso_password": "统一身份认证密码（可选）",
-    "first_monday_date": "{{ SEMESTERS[0]['value'] }}"
+    "semester": "{{ SEMESTERS[0]['label'] }}"
 }
-                </pre>
+            </pre>
             <p>其中 <code>sso_password</code> 是可选的，但在0点至7点之间需要提供。</p>
-            <p><code>first_monday_date</code> 是开学第一周的周一日期，格式为YYYY-MM-DD</p>
-<h3>生成共享链接</h3>
-<p>使用POST请求访问 <code>/generate_url</code> 接口生成加密链接，请求格式与上面相同。</p>
-<p>返回的链接可以通过GET请求直接访问，无需再次输入密码。链接有效期为30天。</p>
+            <p><code>semester</code> 是学期代码，如"2024-2025-2"，用于从教务系统获取特定学期的课表数据</p>
+            <h3>生成共享链接</h3>
+            <p>使用POST请求访问 <code>/generate_url</code> 接口生成加密链接，请求格式与上面相同。</p>
+            <p>返回的链接可以通过GET请求直接访问，无需再次输入密码。链接有效期为30天。</p>
         </div>
     </div>
 
     <script>
-        function updateFirstMonday() {
-            document.getElementById('first_monday_date').value = document.getElementById('semester').value;
-        }
-
-        function submitForm() {
-            const form = document.getElementById('icsForm');
-            const formData = new FormData(form);
-            const jsonData = {};
-            formData.forEach((value, key) => {
-                jsonData[key] = value;
+        // 页面加载时初始化
+        window.addEventListener('DOMContentLoaded', function() {
+            // 初始化隐藏的学期字段
+            updateSemester();
+            
+            // 初始化功能标签切换
+            initFunctionTabs();
+        });
+        
+        // 初始化功能标签切换
+        function initFunctionTabs() {
+            const tabs = document.querySelectorAll('.function-tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // 移除所有标签和内容的活动状态
+                    document.querySelectorAll('.function-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.function-content').forEach(c => c.classList.remove('active'));
+                    
+                    // 添加当前标签的活动状态
+                    tab.classList.add('active');
+                    
+                    // 显示对应的内容
+                    const tabId = tab.getAttribute('data-tab');
+                    document.getElementById(tabId).classList.add('active');
+                });
             });
+        }
+        
+        // 更新学期选择
+        function updateSemester() {
+            const selectedOption = document.getElementById('semester_select').selectedOptions[0];
+            document.getElementById('semester').value = selectedOption.value;
+        }
+        
+        // 学期选择变化时更新隐藏字段
+        document.getElementById('semester_select').addEventListener('change', updateSemester);
+        
+        // 获取表单数据的通用函数
+        function getFormData() {
+            return {
+                userCode: document.getElementById('userCode').value,
+                jwxt_password: document.getElementById('jwxt_password').value,
+                sso_password: document.getElementById('sso_password').value,
+                semester: document.getElementById('semester').value,
+                expire_days: document.getElementById('expire_days')?.value || ""
+            };
+        }
+        
+        // 生成并下载ICS日历
+        function downloadICS() {
+            const formData = getFormData();
+            
+            // 验证必填字段
+            if (!formData.userCode || !formData.jwxt_password) {
+                alert('请填写所有必需的字段（学号、教务系统密码）');
+                return;
+            }
+            
             fetch('/generate_ics', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(jsonData)
+                body: JSON.stringify(formData)
             })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.text().then(text => { throw new Error(text) });
-                    }
-                    return response.blob();
-                })
-                .then(blob => {
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    const filename = formData.get('userCode') + '_schedule.ics';
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    a.remove();
-                })
-                .catch(error => {
-                    alert('生成ICS失败: ' + error.message);
-                });
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text) });
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const filename = formData.userCode + '_schedule.ics';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+            })
+            .catch(error => {
+                alert('生成ICS失败: ' + error.message);
+            });
         }
-
-    function generateShareableUrl() {
-        // 隐藏之前的结果（如果有）
-        document.getElementById('urlResult').style.display = 'none';
-        document.getElementById('copySuccess').style.display = 'none';
-
-        const form = document.getElementById('icsForm');
-        const formData = new FormData(form);
-        const jsonData = {};
-        formData.forEach((value, key) => {
-            jsonData[key] = value;
-        });
-
-        // 验证必填字段
-        if (!jsonData.userCode || !jsonData.jwxt_password || !jsonData.first_monday_date) {
-            alert('请填写所有必需的字段（学号、教务系统密码和开学日期）');
-            return;
-        }
-
-        fetch('/generate_url', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(jsonData)
-        })
+        
+        // 生成分享链接
+        function generateShareableUrl() {
+            // 隐藏之前的结果（如果有）
+            document.getElementById('urlResult').style.display = 'none';
+            document.getElementById('copySuccess').style.display = 'none';
+            
+            const formData = getFormData();
+            
+            // 验证必填字段
+            if (!formData.userCode || !formData.jwxt_password) {
+                alert('请填写所有必需的字段（学号、教务系统密码）');
+                return;
+            }
+            
+            fetch('/generate_url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            })
             .then(response => {
                 if (!response.ok) {
                     return response.text().then(text => { throw new Error(text) });
@@ -298,27 +435,72 @@
             })
             .then(data => {
                 document.getElementById('shareableUrl').value = data.url;
+                
+                // 更新有效期显示
+                const expiryMsg = document.querySelector('#urlResult p:first-child');
+                if (data.expires) {
+                    expiryMsg.innerHTML = `以下是您的共享链接，有效期为<b>${data.expires}</b>。任何人都可以通过此链接直接下载您的课表日历，<b>无需再次输入密码</b>。请妥善保管此链接。`;
+                }
+                
                 document.getElementById('urlResult').style.display = 'block';
             })
             .catch(error => {
                 alert('生成分享链接失败: ' + error.message);
             });
-    }
-
-    function copyUrl() {
-        const urlInput = document.getElementById('shareableUrl');
-        urlInput.select();
-        document.execCommand('copy');
-
-        // 显示成功消息
-        const successMsg = document.getElementById('copySuccess');
-        successMsg.style.display = 'block';
-
-        // 3秒后隐藏成功消息
-        setTimeout(() => {
-            successMsg.style.display = 'none';
-        }, 3000);
-    }
+        }
+        
+        // 生成 CalDAV 配置
+        function generateCalDAVConfig() {
+            const formData = getFormData();
+            
+            // 验证必填字段
+            if (!formData.userCode || !formData.jwxt_password) {
+                alert('请填写所有必需的字段（学号、教务系统密码）');
+                return;
+            }
+            
+            // 隐藏之前的结果（如果有）
+            document.getElementById('configResult').style.display = 'none';
+            
+            fetch('/generate_caldav_config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text) });
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('caldav_url').textContent = data.caldav_url;
+                document.getElementById('username').textContent = data.username;
+                document.getElementById('password').textContent = data.password;
+                document.getElementById('configResult').style.display = 'block';
+            })
+            .catch(error => {
+                alert('生成 CalDAV 配置失败: ' + error.message);
+            });
+        }
+        
+        // 复制 URL
+        function copyUrl() {
+            const urlInput = document.getElementById('shareableUrl');
+            urlInput.select();
+            document.execCommand('copy');
+            
+            // 显示成功消息
+            const successMsg = document.getElementById('copySuccess');
+            successMsg.style.display = 'block';
+            
+            // 3秒后隐藏成功消息
+            setTimeout(() => {
+                successMsg.style.display = 'none';
+            }, 3000);
+        }
     </script>
 </body>
 

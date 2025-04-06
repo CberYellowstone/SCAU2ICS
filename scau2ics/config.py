@@ -4,6 +4,7 @@
 
 import logging
 import os
+from datetime import datetime
 
 # 基础路径配置
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,16 +18,6 @@ if not os.path.exists(CACHE_DIR):
 JWXT_URL = "https://jwxt.scau.edu.cn"
 JWXT_URL_BACKUP = "https://jwxt-scau-edu-cn-s.vpn.scau.edu.cn"
 
-# 学期配置 - 可根据实际情况调整
-CURRENT_SEMESTER = "2024-2025-2"
-
-# 学期列表配置 - 每学期对应开学第一周周一的日期
-SEMESTERS = [
-    {"value": "2025-02-17", "label": "2024-2025-2"},
-    {"value": "2024-09-02", "label": "2024-2025-1"},
-    {"value": "2024-02-26", "label": "2023-2024-2"},
-]
-
 # 加密配置
 ENCRYPTION_SALT = "SCAU2ICS_SALT_FOR_SECURE_URLS"  # 用于URL加密的盐值
 URL_EXPIRE_DAYS = 30  # URL有效期（天）
@@ -36,3 +27,21 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("SCAU2ICS")
+
+CLASS_TIMES = {
+    "01": ("08:00", "08:40"),
+    "02": ("08:45", "09:25"),
+    "03": ("09:55", "10:35"),
+    "04": ("10:40", "11:20"),
+    "05": ("11:25", "12:05"),
+    "06": ("12:40", "13:20"),
+    "07": ("13:25", "14:05"),
+    "08": ("14:30", "15:10"),
+    "09": ("15:15", "15:55"),
+    "10": ("16:25", "17:05"),
+    "11": ("17:10", "17:50"),
+    "12": ("17:55", "18:35"),
+    "13": ("19:30", "20:10"),
+    "14": ("20:15", "20:55"),
+    "15": ("21:00", "21:40"),
+}
