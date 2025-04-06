@@ -7,9 +7,9 @@ from datetime import datetime
 from datetime import time as dt_time
 from typing import Any, Dict, Optional, Tuple
 
-from flask import Flask, Response, request
+from flask import Flask, Response, render_template, request
 
-from scau2ics.config import logger
+from scau2ics.config import SEMESTERS, logger
 from scau2ics.ics import generate_ics
 from scau2ics.student import Student
 
@@ -117,36 +117,8 @@ def _handle_generation_error(
 
 @app.route("/", methods=["GET"])
 def index():
-    """首页，提供简单的使用说明"""
-    return """
-    <html>
-        <head>
-            <title>SCAU2ICS - 华南农业大学课表导出为ICS日历</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-                h1 { color: #4CAF50; }
-                code { background-color: #f5f5f5; padding: 2px 4px; border-radius: 4px; }
-                pre { background-color: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; }
-            </style>
-        </head>
-        <body>
-            <h1>SCAU2ICS - 华南农业大学课表导出为ICS日历</h1>
-            <p>使用POST请求访问 <code>/generate_ics</code> 接口生成ICS文件。</p>
-            <h2>请求格式示例:</h2>
-            <pre>
-{
-    "userCode": "2023XXXXXXXX",
-    "jwxt_password": "教务系统密码",
-    "sso_password": "统一身份认证密码（可选）",
-    "first_monday_date": "2025-02-17"
-}
-            </pre>
-            <p>其中 <code>sso_password</code> 是可选的，但在0点至7点之间需要提供。</p>
-            <p><code>first_monday_date</code> 是开学第一周的周一日期，格式为YYYY-MM-DD</p>
-            <p>更多信息请访问 <a href="https://github.com/yourusername/SCAU2ICS">GitHub项目</a></p>
-        </body>
-    </html>
-    """
+    """首页，提供简单的使用说明和表单"""
+    return render_template("index.html", SEMESTERS=SEMESTERS)
 
 
 if __name__ == "__main__":

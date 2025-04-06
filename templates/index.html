@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>SCAU2ICS - 华南农业大学课表导出为ICS日历</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #4CAF50;
+        }
+
+        h2 {
+            color: #2E8B57;
+            margin-top: 20px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        code {
+            background-color: #f5f5f5;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .api-doc {
+            margin-top: 30px;
+        }
+
+        .night-warning {
+            color: #ff6600;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>SCAU2ICS - 华南农业大学课表导出为ICS日历</h1>
+
+    <div class="container">
+        <div class="card">
+            <h2>生成我的课表日历</h2>
+            <form id="icsForm" action="/generate_ics" method="post">
+                <div class="form-group">
+                    <label for="userCode">学号:</label>
+                    <input type="text" id="userCode" name="userCode" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="jwxt_password">教务系统密码:</label>
+                    <input type="password" id="jwxt_password" name="jwxt_password" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="sso_password">统一身份认证密码 <span class="night-warning">(0点至7点必填)</span>:</label>
+                    <input type="password" id="sso_password" name="sso_password" placeholder="可选，夜间时段(0:00-7:00)必填">
+                </div>
+
+                <div class="form-group">
+                    <label for="first_monday_date">开学第一周的周一日期:</label>
+                    <input type="date" id="first_monday_date" name="first_monday_date" required
+                        value="{{ SEMESTERS[0]['value'] }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="semester">学期选择:</label>
+                    <select id="semester" onchange="updateFirstMonday()">
+                        {%- for semester in SEMESTERS %}
+                        <option value="{{ semester['value'] }}">{{ semester['label'] }}</option>
+                        {%- endfor %}
+                    </select>
+                </div>
+
+                <button type="button" onclick="submitForm()">生成并下载ICS日历</button>
+            </form>
+        </div>
+
+        <div class="card api-doc">
+            <h2>API使用说明</h2>
+            <p>使用POST请求访问 <code>/generate_ics</code> 接口生成ICS文件。</p>
+            <h3>请求格式示例:</h3>
+            <pre>
+{
+    "userCode": "2023XXXXXXXX",
+    "jwxt_password": "教务系统密码",
+    "sso_password": "统一身份认证密码（可选）",
+    "first_monday_date": "{{ SEMESTERS[0]['value'] }}"
+}
+                </pre>
+            <p>其中 <code>sso_password</code> 是可选的，但在0点至7点之间需要提供。</p>
+            <p><code>first_monday_date</code> 是开学第一周的周一日期，格式为YYYY-MM-DD</p>
+        </div>
+    </div>
+
+    <script>
+        function updateFirstMonday() {
+            document.getElementById('first_monday_date').value = document.getElementById('semester').value;
+        }
+
+        function submitForm() {
+            const form = document.getElementById('icsForm');
+            const formData = new FormData(form);
+            const jsonData = {};
+            formData.forEach((value, key) => {
+                jsonData[key] = value;
+            });
+            fetch('/generate_ics', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(jsonData)
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.text().then(text => { throw new Error(text) });
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const filename = formData.get('userCode') + '_schedule.ics';
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                })
+                .catch(error => {
+                    alert('生成ICS失败: ' + error.message);
+                });
+        }
+    </script>
+</body>
+
+</html>
