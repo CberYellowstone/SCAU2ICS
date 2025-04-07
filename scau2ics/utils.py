@@ -128,3 +128,51 @@ def get_cache_timestamp(file_path: str) -> Optional[str]:
     """
     cache_data = load_json_cache(file_path)
     return cache_data.get("timestamp") if cache_data else None
+
+
+def generate_semesters():
+    """
+    根据当前日期生成学期列表
+    - 当前日期在8月份前（1-7月）：当前学期为"前一年-当前年-2"（春季学期）
+    - 当前日期在8月份后（8-12月）：当前学期为"当前年-下一年-1"（秋季学期）
+
+    返回的列表顺序：当前学期、下学期、上学期、前一个学期、大前个学期
+    """
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+
+    semesters = []
+
+    # 确定当前学期
+    if current_month < 8:  # 1-7月，当前是春季学期
+        current_semester = f"{current_year-1}-{current_year}-2"
+        # 接下来是秋季学期
+        next_semester = f"{current_year}-{current_year+1}-1"
+        # 上一学期是秋季学期
+        prev_semester = f"{current_year-1}-{current_year}-1"
+        # 上上学期是春季学期
+        prev_prev_semester = f"{current_year-2}-{current_year-1}-2"
+        # 上上上学期是秋季学期
+        prev_prev_prev_semester = f"{current_year-2}-{current_year-1}-1"
+    else:  # 8-12月，当前是秋季学期
+        current_semester = f"{current_year}-{current_year+1}-1"
+        # 接下来是春季学期
+        next_semester = f"{current_year}-{current_year+1}-2"
+        # 上一学期是春季学期
+        prev_semester = f"{current_year-1}-{current_year}-2"
+        # 上上学期是秋季学期
+        prev_prev_semester = f"{current_year-1}-{current_year}-1"
+        # 上上上学期是春季学期
+        prev_prev_prev_semester = f"{current_year-2}-{current_year-1}-2"
+
+    # 添加到学期列表中，顺序为：当前学期、下学期、上学期、前一个学期、大前个学期
+    semesters = [
+        {"label": current_semester},
+        {"label": next_semester},
+        {"label": prev_semester},
+        {"label": prev_prev_semester},
+        {"label": prev_prev_prev_semester},
+    ]
+
+    return semesters

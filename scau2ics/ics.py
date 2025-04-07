@@ -23,28 +23,29 @@ ICS_FILE_FOOTER = ["END:VCALENDAR"]
 TIMEZONE = "Asia/Shanghai"
 
 
-def generate_ics(student: Student, first_monday_date: str) -> str:
+def generate_ics(student: Student, semester: str) -> str:
     """
     生成ICS日历文件字符串
 
     Args:
         student: 学生对象
-        first_monday_date: 第一周周一的日期，格式为"YYYY-MM-DD"
+        semester: 学期代码，必须提供
 
     Returns:
         ICS文件内容的字符串
     """
-    # 解析第一周周一的日期
-    first_monday = datetime.strptime(first_monday_date, "%Y-%m-%d")
+    # 获取第一周周一的日期（直接获取datetime对象）
+    first_monday = student.get_first_monday_date(semester)
 
     # 获取课程表
-    course_schedule = student.get_course_schedule()
+    course_schedule = student.get_course_schedule(semester)
     courses_dict = student.parse_course_schedule(course_schedule)
+    logger.info(f"获取到 {first_monday.strftime('%Y-%m-%d')} 作为第一周周一")
 
-    # 获取缓存更新时间
-    cache_update_time = student.get_cache_update_time() or datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    # 获取缓存更新时间，传递学期参数
+    cache_update_time = student.get_cache_update_time(
+        semester
+    ) or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 构建ICS内容
     ics_content = ICS_FILE_HEADER.copy()
@@ -113,8 +114,13 @@ def add_course_events(
         weeks = student.parse_course_weeks(course_info.course_weeks)
 
         # 解析上课和下课时间
-        start_hour, start_minute = map(int, course_info.start_time.split(":"))
-        end_hour, end_minute = map(int, course_info.end_time.split(":"))
+        try:
+            start_hour, start_minute = map(int, course_info.start_time.split(":"))
+            end_hour, end_minute = map(int, course_info.end_time.split(":"))
+        except Exception as e:
+            logger.error(f"解析上课时间失败: {e}")
+            logger.warning(f"课程 {course_info.course_name} 的上课时间格式不正确")
+            continue
 
         # 准备事件信息
         course_type = f"({course_info.course_type})" if course_info.course_type else ""

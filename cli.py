@@ -25,7 +25,7 @@ def parse_args():
         help="统一身份认证密码（可选，在凌晨0点至早上7点之间需要）",
     )
     parser.add_argument(
-        "--first-monday", "-f", required=True, help="第一周周一的日期，格式为YYYY-MM-DD"
+        "--semester", "-m", required=True, help="学期代码，如2024-2025-2"
     )
     parser.add_argument("--output", "-o", help='输出文件路径，默认为"我的课表.ics"')
 
@@ -45,7 +45,7 @@ def main():
 
         # 生成ICS内容
         logger.info(f"正在为学号 {args.user_code} 生成ICS文件...")
-        ics_content = generate_ics(student, args.first_monday)
+        ics_content = generate_ics(student, args.semester)
 
         # 保存ICS文件
         with open(output_file, "w", encoding="utf-8") as f:

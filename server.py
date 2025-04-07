@@ -2,6 +2,7 @@
 SCAU2ICS Web服务 - 提供Web API生成ICS文件
 """
 
+# 标准库导入
 import base64
 import binascii
 import hashlib
@@ -9,40 +10,52 @@ import json
 from datetime import datetime
 from datetime import time as dt_time
 from datetime import timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional
 
+# 第三方库导入
 import cryptography
 from cryptography.fernet import Fernet
 from flask import Flask, Response, render_template, request, url_for
 
-from scau2ics.config import ENCRYPTION_SALT, SEMESTERS, URL_EXPIRE_DAYS, logger
+# 本地模块导入
+from scau2ics.config import ENCRYPTION_SALT, URL_EXPIRE_DAYS, logger
 from scau2ics.ics import generate_ics
 from scau2ics.student import Student
+from scau2ics.utils import generate_semesters
 
 app = Flask(__name__)
 
 # 常量
 NIGHT_START = dt_time(0, 0)
 NIGHT_END = dt_time(7, 0)
-REQUIRED_FIELDS = ["userCode", "jwxt_password", "first_monday_date"]
+REQUIRED_FIELDS = ["userCode", "jwxt_password", "semester"]
 
 
 # 加密工具函数
-def generate_key_from_salt(salt):
+def generate_key_from_salt(salt: str) -> bytes:
     """从盐值生成Fernet密钥"""
     # 使用盐值和固定字符串生成SHA256哈希，然后base64编码作为密钥
     digest = hashlib.sha256(salt.encode()).digest()
     return base64.urlsafe_b64encode(digest)
 
 
-def encrypt_data(data):
-    """加密数据"""
+def encrypt_data(data: Dict, expire_days: Optional[int] = None) -> str:
+    """
+    加密数据
+
+    Args:
+        data: 要加密的数据字典
+        expire_days: 过期天数，None表示使用默认配置，0表示永不过期
+    """
     key = generate_key_from_salt(ENCRYPTION_SALT)
     fernet = Fernet(key)
 
-    # 添加过期时间
-    expiry = datetime.now() + timedelta(days=URL_EXPIRE_DAYS)
-    data["expires"] = expiry.isoformat()
+    # 添加过期时间（如果需要）
+    if expire_days != 0:  # 0表示永不过期
+        days = expire_days if expire_days is not None else URL_EXPIRE_DAYS
+        expiry = datetime.now() + timedelta(days=days)
+        data["expires"] = expiry.isoformat()
+    # 不设置expires字段表示永不过期
 
     # 加密JSON数据
     json_data = json.dumps(data)
@@ -50,7 +63,7 @@ def encrypt_data(data):
     return base64.urlsafe_b64encode(encrypted).decode()
 
 
-def decrypt_data(encrypted_token):
+def decrypt_data(encrypted_token: str) -> Dict:
     """解密数据"""
     key = generate_key_from_salt(ENCRYPTION_SALT)
     fernet = Fernet(key)
@@ -73,27 +86,98 @@ def decrypt_data(encrypted_token):
         raise ValueError(f"无效或已过期的URL: {str(e)}")
 
 
+def _validate_request_data(data: Dict) -> Optional[Response]:
+    """验证请求数据，如果有错误则返回错误响应，否则返回None"""
+    if not data:
+        return Response("请求数据不能为空", status=400)
+
+    # 验证必要参数
+    missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
+    if missing_fields:
+        return Response(f"缺少必要参数: {', '.join(missing_fields)}", status=400)
+
+    return None
+
+
+def _extract_user_data(data: Dict) -> tuple:
+    """从请求数据中提取用户相关信息"""
+    user_code = data["userCode"]
+    jwxt_password = data["jwxt_password"]
+    sso_password = data.get("sso_password", "")
+    semester = data["semester"]
+
+    return (user_code, jwxt_password, sso_password, semester)
+
+
+def _generate_ics_for_user(
+    user_code: str,
+    jwxt_password: str,
+    sso_password: str,
+    semester: str,
+    is_from_url: bool = False,
+) -> Response:
+    """为用户生成ICS文件，处理各种异常情况"""
+    is_sso_needed = _is_night_time()
+
+    try:
+        # 尝试创建学生对象并生成ICS
+        student = Student(user_code, jwxt_password, sso_password)
+        ics_content = generate_ics(student, semester)
+        source = "加密URL" if is_from_url else "直接请求"
+        logger.info(f"成功通过{source}为用户 {user_code} 生成ICS")
+        return _create_ics_response(ics_content, user_code)
+    except Exception as e:
+        # 处理生成失败的情况
+        logger.error(f"生成ICS时发生错误: {str(e)}")
+        return _handle_generation_error(
+            e,
+            user_code,
+            jwxt_password,
+            is_sso_needed,
+            sso_password,
+            semester,
+        )
+
+
 @app.route("/generate_url", methods=["POST"])
 def handle_generate_url():
     """处理生成加密URL的请求"""
     try:
-        # 解析请求数据
+        # 解析并验证请求数据
         data = request.json
-        if not data:
-            return Response("请求数据不能为空", status=400)
+        validation_error = _validate_request_data(data)
+        if validation_error:
+            return validation_error
 
-        # 验证必要参数
-        missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
-        if missing_fields:
-            return Response(f"缺少必要参数: {', '.join(missing_fields)}", status=400)
+        # 获取过期天数参数（如果有）
+        expire_days = data.pop("expire_days", None)
+        try:
+            if expire_days is not None:
+                expire_days = int(expire_days)
+        except (ValueError, TypeError):
+            return Response("expire_days必须是整数", status=400)
 
-        # 加密数据
-        encrypted_token = encrypt_data(data)
-
-        # 构建URL
+        # 加密数据并构建URL
+        encrypted_token = encrypt_data(data, expire_days)
         url = url_for("handle_generate_ics_get", token=encrypted_token, _external=True)
 
-        return Response(json.dumps({"url": url}), mimetype="application/json")
+        # 构建响应
+        response_data = {"url": url}
+        # 添加过期信息到响应
+        if expire_days == 0:
+            response_data["expires"] = "永不过期"
+        elif expire_days is not None:
+            expiry_date = (datetime.now() + timedelta(days=expire_days)).strftime(
+                "%Y-%m-%d"
+            )
+            response_data["expires"] = f"{expire_days}天 ({expiry_date})"
+        else:
+            expiry_date = (datetime.now() + timedelta(days=URL_EXPIRE_DAYS)).strftime(
+                "%Y-%m-%d"
+            )
+            response_data["expires"] = f"{URL_EXPIRE_DAYS}天 ({expiry_date})"
+
+        return Response(json.dumps(response_data), mimetype="application/json")
 
     except Exception as e:
         logger.error(f"生成URL时发生错误: {str(e)}")
@@ -106,40 +190,15 @@ def handle_generate_ics():
     try:
         # 解析和验证请求数据
         data = request.json
-        if not data:
-            return Response("请求数据不能为空", status=400)
+        validation_error = _validate_request_data(data)
+        if validation_error:
+            return validation_error
 
-        # 验证必要参数
-        missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
-        if missing_fields:
-            return Response(f"缺少必要参数: {', '.join(missing_fields)}", status=400)
+        # 提取用户相关信息
+        user_code, jwxt_password, sso_password, semester = _extract_user_data(data)
 
-        # 获取参数
-        user_code = data["userCode"]
-        jwxt_password = data["jwxt_password"]
-        sso_password = data.get("sso_password", "")
-        first_monday_date = data["first_monday_date"]
-
-        # 检查是否需要SSO登录(夜间时段)
-        is_sso_needed = _is_night_time()
-
-        try:
-            # 尝试创建学生对象并生成ICS
-            student = Student(user_code, jwxt_password, sso_password)
-            ics_content = generate_ics(student, first_monday_date)
-            logger.info(f"成功为用户 {user_code} 生成ICS")
-            return _create_ics_response(ics_content, user_code)
-        except Exception as e:
-            # 处理生成失败的情况
-            logger.error(f"生成ICS时发生错误: {str(e)}")
-            return _handle_generation_error(
-                e,
-                user_code,
-                jwxt_password,
-                first_monday_date,
-                is_sso_needed,
-                sso_password,
-            )
+        # 生成ICS文件
+        return _generate_ics_for_user(user_code, jwxt_password, sso_password, semester)
 
     except Exception as e:
         # 处理请求解析异常
@@ -157,32 +216,22 @@ def handle_generate_ics_get(token):
         except ValueError as e:
             return Response(f"无效或已过期的URL: {str(e)}", status=400)
 
-        # 获取参数
-        user_code = data["userCode"]
-        jwxt_password = data["jwxt_password"]
-        sso_password = data.get("sso_password", "")
-        first_monday_date = data["first_monday_date"]
+        # 验证必要参数
+        validation_error = _validate_request_data(data)
+        if validation_error:
+            return validation_error
 
-        # 检查是否需要SSO登录(夜间时段)
-        is_sso_needed = _is_night_time()
+        # 提取用户相关信息
+        user_code, jwxt_password, sso_password, semester = _extract_user_data(data)
 
-        try:
-            # 尝试创建学生对象并生成ICS
-            student = Student(user_code, jwxt_password, sso_password)
-            ics_content = generate_ics(student, first_monday_date)
-            logger.info(f"成功通过加密URL为用户 {user_code} 生成ICS")
-            return _create_ics_response(ics_content, user_code)
-        except Exception as e:
-            # 处理生成失败的情况
-            logger.error(f"通过加密URL生成ICS时发生错误: {str(e)}")
-            return _handle_generation_error(
-                e,
-                user_code,
-                jwxt_password,
-                first_monday_date,
-                is_sso_needed,
-                sso_password,
-            )
+        # 生成ICS文件
+        return _generate_ics_for_user(
+            user_code,
+            jwxt_password,
+            sso_password,
+            semester,
+            is_from_url=True,
+        )
 
     except Exception as e:
         # 处理解析异常
@@ -211,9 +260,9 @@ def _handle_generation_error(
     error: Exception,
     user_code: str,
     jwxt_password: str,
-    first_monday_date: str,
     is_sso_needed: bool,
     sso_password: str,
+    semester: str,
 ) -> Response:
     """处理ICS生成错误"""
     # 检查是否是缺少SSO密码导致的错误
@@ -223,7 +272,7 @@ def _handle_generation_error(
         # 尝试从缓存创建学生对象
         try:
             student = Student(user_code, jwxt_password, "")
-            ics_content = generate_ics(student, first_monday_date)
+            ics_content = generate_ics(student, semester)
             logger.info(f"成功从缓存为用户 {user_code} 生成ICS")
             return _create_ics_response(ics_content, user_code)
         except Exception as cache_error:
@@ -240,7 +289,9 @@ def _handle_generation_error(
 @app.route("/", methods=["GET"])
 def index():
     """首页，提供简单的使用说明和表单"""
-    return render_template("index.html", SEMESTERS=SEMESTERS)
+    return render_template(
+        "index.html", SEMESTERS=generate_semesters(), URL_EXPIRE_DAYS=URL_EXPIRE_DAYS
+    )
 
 
 if __name__ == "__main__":

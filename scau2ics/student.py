@@ -12,13 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from scau2ics.browser import get_browser_manager
-from scau2ics.config import (
-    CACHE_DIR,
-    CURRENT_SEMESTER,
-    JWXT_URL,
-    JWXT_URL_BACKUP,
-    logger,
-)
+from scau2ics.config import CACHE_DIR, CLASS_TIMES, JWXT_URL, JWXT_URL_BACKUP, logger
 from scau2ics.utils import (
     get_cache_timestamp,
     get_captcha,
@@ -69,7 +63,7 @@ class Student:
         self.userCode = userCode
         self.jwxt_password = jwxt_password
         self.sso_password = sso_password
-        self.cache_file = os.path.join(CACHE_DIR, f"cache_{userCode}.json")
+        self.base_cache_file = os.path.join(CACHE_DIR, f"cache_{userCode}")
         self.token: Optional[str] = None
         self.cookies: Optional[Dict[str, str]] = None
         self.session: Optional[str] = None
@@ -78,6 +72,10 @@ class Student:
 
         # 尝试登录，登录失败时尝试使用缓存
         self._initialize_session()
+
+    def _get_cache_file_for_semester(self, semester: str) -> str:
+        """获取特定学期的缓存文件路径"""
+        return f"{self.base_cache_file}_{semester}.json"
 
     def _is_night_time(self) -> bool:
         """判断当前是否为夜间时段（0点至7点）"""
@@ -98,8 +96,12 @@ class Student:
 
     def _try_use_cache(self, error_msg: str = "") -> None:
         """尝试使用缓存数据"""
-        if os.path.exists(self.cache_file):
-            logger.info(f"使用缓存数据: {self.cache_file}")
+        # 检查是否存在任何学期的缓存文件
+        cache_files = [
+            f for f in os.listdir(CACHE_DIR) if f.startswith(f"cache_{self.userCode}_")
+        ]
+        if cache_files:
+            logger.info(f"找到缓存数据: {cache_files}")
         else:
             msg = "无法登录且没有找到缓存数据"
             if error_msg:
@@ -195,18 +197,74 @@ class Student:
         rep = requests.get(url, headers=headers, cookies=self.cookies, verify=False)
         return rep.json()
 
-    def get_course_schedule(self) -> Optional[Dict[str, Any]]:
-        """获取学生课表数据，出错时尝试使用缓存"""
+    def get_first_monday_date(self, semester: str) -> datetime.datetime:
+        """
+        获取学期的第一周周一日期
+
+        Args:
+            semester: 学期代码，必须提供
+
+        Returns:
+            datetime.datetime: 第一周周一的日期（datetime对象）
+        """
+        url = f"{self.base_url}/resService/jwxtpt/v1/jczy/educationInfo_jxzlInfo/findWeekCalendarListHnnydx?resourceCode=XSMH1701&apiCode=jw.jczy.educationinfo.controller.WeekCalendarInfoController.findWeekCalendarListHnnydx"
+        headers = {
+            "TOKEN": self.token,
+            "Accept": "application/json, text/plain",
+            "app": "PCWEB",
+        }
+        data = {"xnxq": semester}
+        rep = requests.post(
+            url, headers=headers, cookies=self.cookies, json=data, verify=False
+        )
+        result = rep.json()
+        if result["errorCode"] != "success":
+            raise Exception(f"获取第一周星期一日期失败: {result['errorMessage']}")
+        # date["rq"] 是 形如 "1739203200000" 的时间戳
+        dates = sorted(
+            [date["rq"] for date in result["data"] if date["jxzlys_name"] != "非上课"]
+        )
+        # 获取第一个日期，最小的即为第一周星期一的日期
+        first_monday_timestamp = dates[0]
+        first_monday_date = datetime.datetime.fromtimestamp(
+            first_monday_timestamp / 1000, TZ_UTC8
+        )
+        return first_monday_date
+
+    def get_course_schedule(self, semester) -> Optional[Dict[str, Any]]:
+        """
+        获取学生课表数据，出错时尝试使用缓存
+
+        Args:
+            semester: 学期代码，必须提供
+        """
         try:
-            course_schedule = self._fetch_course_schedule()
-            save_json_cache(self.cache_file, course_schedule)
+            # 确保必须提供学期
+            if semester is None:
+                raise ValueError("必须提供学期参数")
+
+            # 获取特定学期的缓存文件
+            cache_file = self._get_cache_file_for_semester(semester)
+
+            course_schedule = self._fetch_course_schedule(semester)
+            # 保存到特定学期的缓存文件
+            save_json_cache(cache_file, course_schedule)
             return course_schedule
         except Exception as e:
             logger.error(f"获取课表失败: {str(e)}")
-            return self._load_cached_schedule(str(e))
+            return self._load_cached_schedule(semester, str(e))
 
-    def _fetch_course_schedule(self) -> Dict[str, Any]:
-        """从教务系统获取课表数据"""
+    def _fetch_course_schedule(self, semester) -> Dict[str, Any]:
+        """
+        从教务系统获取课表数据
+
+        Args:
+            semester: 学期代码，必须提供
+        """
+        # 确保必须提供学期
+        if semester is None:
+            raise ValueError("必须提供学期参数")
+
         url = f"{self.base_url}/resService/jwxtpt/v1/xsd/xsdqxxkb_info/searchOneXskbList?resourceCode=XSMH0701&apiCode=jw.xsd.xsdInfo.controller.XsdQxxkbController.searchOneXskbList"
         headers = {
             "TOKEN": self.token,
@@ -214,7 +272,7 @@ class Student:
             "app": "PCWEB",
         }
         data = {
-            "jczy013id": CURRENT_SEMESTER,
+            "jczy013id": semester,
             "pkgl002id": PKGL_ID,
             "zt": "2",
             "sctype": "hnnydx",
@@ -224,15 +282,31 @@ class Student:
         )
         return rep.json()
 
-    def _load_cached_schedule(self, error_msg: str) -> Optional[Dict[str, Any]]:
+    def _load_cached_schedule(
+        self, semester: str, error_msg: str
+    ) -> Optional[Dict[str, Any]]:
         """从缓存加载课表数据"""
-        if os.path.exists(self.cache_file):
-            logger.info(f"从缓存加载课表数据: {self.cache_file}")
-            cache_data = load_json_cache(self.cache_file)
+        cache_file = self._get_cache_file_for_semester(semester)
+        if os.path.exists(cache_file):
+            logger.info(f"从缓存加载课表数据: {cache_file}")
+            cache_data = load_json_cache(cache_file)
             if cache_data and "data" in cache_data:
                 return cache_data["data"]
 
         raise Exception(f"获取课表失败，且无可用缓存: {error_msg}")
+
+    def get_start_end_time(self, class_numbers: str) -> Tuple[str, str]:
+        """
+        获取课程的开始和结束时间
+
+        Args:
+            class_numbers: 课程节次字符串，如"303,304,305"
+        """
+        class_numbers = re.sub(r"\s+", "", class_numbers)
+        class_nums_list = class_numbers.split(",")
+        start_time = CLASS_TIMES[class_nums_list[0][-2:]][0]
+        end_time = CLASS_TIMES[class_nums_list[-1][-2:]][-1]
+        return start_time, end_time
 
     def parse_course_schedule(
         self, course_schedule: Optional[Dict[str, Any]]
@@ -259,13 +333,32 @@ class Student:
                 group_name=course["fzmc_name"],
                 day_of_week=day_of_week,
             )
+            # start_time 和 end_time 有可能是空字符串，此时需要fallback使用pksjmx字段配合get_start_end_time方法
+            if not course_info.start_time or not course_info.end_time:
+                logger.warning(
+                    f"课程 {course_info.course_name} 的上课时间或下课时间为空，尝试从pksjmx字段获取"
+                )
+                class_numbers = course["pksjmx"]
+                start_time, end_time = self.get_start_end_time(class_numbers)
+                logger.warning(
+                    f"使用pksjmx字段获取的上课时间: {start_time}, 下课时间: {end_time}"
+                )
+                course_info = course_info._replace(
+                    start_time=start_time, end_time=end_time
+                )
             courses_dict[course["id"]] = course_info
 
         return courses_dict
 
-    def get_cache_update_time(self) -> Optional[str]:
-        """获取缓存的更新时间"""
-        return get_cache_timestamp(self.cache_file)
+    def get_cache_update_time(self, semester: str) -> Optional[str]:
+        """
+        获取缓存的更新时间
+
+        Args:
+            semester: 学期代码
+        """
+        cache_file = self._get_cache_file_for_semester(semester)
+        return get_cache_timestamp(cache_file)
 
     def parse_course_weeks(self, course_weeks: str) -> List[Tuple[int, int]]:
         """
@@ -287,9 +380,14 @@ class Student:
                 weeks.append((week, week))
         return weeks
 
-    def print_course_schedule(self) -> None:
-        """打印课表信息（用于调试）"""
-        course_schedule = self.get_course_schedule()
+    def print_course_schedule(self, semester) -> None:
+        """
+        打印课表信息（用于调试）
+
+        Args:
+            semester: 学期代码，必须提供
+        """
+        course_schedule = self.get_course_schedule(semester)
         courses_dict = self.parse_course_schedule(course_schedule)
 
         for _, course_info in courses_dict.items():
