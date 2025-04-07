@@ -188,8 +188,23 @@ def handle_generate_url():
 def handle_generate_ics():
     """处理ICS生成请求 (POST方法)"""
     try:
-        # 解析和验证请求数据
-        data = request.json
+        # 根据Content-Type判断数据格式并解析
+        content_type = request.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            # JSON格式数据
+            data = request.json
+        elif (
+            "application/x-www-form-urlencoded" in content_type
+            or "multipart/form-data" in content_type
+        ):
+            # 表单提交数据
+            data = request.form.to_dict()
+        else:
+            return Response(
+                "不支持的Content-Type，请使用application/json或form表单提交", status=415
+            )
+
+        # 验证请求数据
         validation_error = _validate_request_data(data)
         if validation_error:
             return validation_error

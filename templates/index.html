@@ -69,6 +69,78 @@
             box-sizing: border-box;
         }
 
+        /* 复选框样式 */
+        .checkbox-group {
+            margin: 5px 0;
+        }
+        
+        .toggle-button {
+            display: inline-flex;
+            align-items: center;
+            background-color: #f0f7f0;
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid #c8e6c9;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            width: auto;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .toggle-button:hover {
+            background-color: #e8f5e9;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+        }
+        
+        .toggle-button input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+        
+        .toggle-label {
+            font-weight: normal;
+            color: #2E8B57;
+            font-size: 14px;
+        }
+
+        .sso-password-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .square-button {
+            display: inline-flex;
+            align-items: center;
+            background-color: #f0f7f0;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #c8e6c9;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .square-button:hover {
+            background-color: #e8f5e9;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+        }
+
+        .square-button input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        .button-label {
+            font-weight: normal;
+            color: #2E8B57;
+            font-size: 14px;
+        }
+
         button {
             background-color: #4CAF50;
             color: white;
@@ -128,17 +200,33 @@
             font-size: 14px;
         }
 
-        .copy-btn {
+        .copy-btn, .open-btn {
             background-color: #4CAF50;
             color: white;
             border: none;
             border-radius: 0 4px 4px 0;
             padding: 0 15px;
             cursor: pointer;
+            min-width: 60px; /* 确保按钮有足够的宽度 */
+            white-space: nowrap; /* 防止文字换行 */
         }
 
         .copy-btn:hover {
             background-color: #45a049;
+        }
+
+        .open-btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0 15px;
+            cursor: pointer;
+            margin-left: 8px;
+        }
+
+        .open-btn:hover {
+            background-color: #2980b9;
         }
 
         .success-message {
@@ -158,50 +246,58 @@
         <div class="card">
             <h2>输入你的基本信息</h2>
             
-            <div id="commonForm">
-                <div class="form-group">
-                    <label for="userCode">学号:</label>
-                    <input type="text" id="userCode" name="userCode" required>
-                </div>
+            <form id="downloadForm" action="/generate_ics" method="post" target="_blank">
+                <div id="commonForm">
+                    <div class="form-group">
+                        <label for="userCode">学号:</label>
+                        <input type="text" id="userCode" name="userCode" required>
+                    </div>
 
-                <div class="form-group">
-                    <label for="jwxt_password">教务系统密码:</label>
-                    <input type="password" id="jwxt_password" name="jwxt_password" required>
-                </div>
+                    <div class="form-group">
+                        <label for="jwxt_password">教务系统密码:</label>
+                        <input type="password" id="jwxt_password" name="jwxt_password" required>
+                    </div>
 
-                <div class="form-group">
-                    <label for="sso_password">统一身份认证密码 <span class="night-warning">(0点至7点必填)</span>:</label>
-                    <input type="password" id="sso_password" name="sso_password" placeholder="可选，夜间时段(0:00-7:00)必填">
-                </div>
+                    <div class="form-group" id="sso_password_group">
+                        <div class="sso-password-container">
+                            <label for="sso_password">统一身份认证密码 <span class="night-warning">(0点至7点必填)</span>:</label>
+                            <label class="square-button">
+                                <input type="checkbox" id="same_password" name="same_password">
+                                <span class="button-label">使用相同密码</span>
+                            </label>
+                        </div>
+                        <input type="password" id="sso_password" name="sso_password" placeholder="可选，夜间时段(0:00-7:00)必填">
+                    </div>
 
+                    <div class="form-group">
+                        <label for="semester_select">学期选择:</label>
+                        <select id="semester_select" onchange="updateSemester()">
+                            {%- for semester in SEMESTERS %}
+                            <option value="{{ semester['label'] }}">{{ semester['label'] }}</option>
+                            {%- endfor %}
+                        </select>
+                        <input type="hidden" id="semester" name="semester" value="{{ SEMESTERS[0]['label'] }}">
+                    </div>
+                </div>
+                
                 <div class="form-group">
-                    <label for="semester_select">学期选择:</label>
-                    <select id="semester_select">
-                        {%- for semester in SEMESTERS %}
-                        <option value="{{ semester['label'] }}">{{ semester['label'] }}</option>
-                        {%- endfor %}
+                    <label for="expire_days">链接有效期:</label>
+                    <select id="expire_days" name="expire_days">
+                        <option value="{{ URL_EXPIRE_DAYS }}">默认 ({{ URL_EXPIRE_DAYS }}天)</option>
+                        <option value="1">1天</option>
+                        <option value="7">7天</option>
+                        <option value="30">30天</option>
+                        <option value="90">90天</option>
+                        <option value="365">1年</option>
+                        <option value="0">永不过期</option>
                     </select>
-                    <input type="hidden" id="semester" name="semester" value="{{ SEMESTERS[0]['label'] }}">
                 </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="expire_days">链接有效期:</label>
-                <select id="expire_days" name="expire_days">
-                    <option value="{{ URL_EXPIRE_DAYS }}">默认 ({{ URL_EXPIRE_DAYS }}天)</option>
-                    <option value="1">1天</option>
-                    <option value="7">7天</option>
-                    <option value="30">30天</option>
-                    <option value="90">90天</option>
-                    <option value="365">1年</option>
-                    <option value="0">永不过期</option>
-                </select>
-            </div>
 
-            <div class="button-container">
-                <button type="button" onclick="downloadICS()">生成并下载ICS日历</button>
-                <button type="button" class="button-secondary" onclick="generateShareableUrl()">生成分享链接</button>
-            </div>
+                <div class="button-container">
+                    <button type="submit" id="download-btn">生成并下载ICS日历</button>
+                    <button type="button" class="button-secondary" onclick="generateShareableUrl()">生成分享链接</button>
+                </div>
+            </form>
             
             <!-- 分享链接结果 -->
             <div id="urlResult" class="url-result">
@@ -209,6 +305,7 @@
                 <div class="url-box">
                     <input type="text" id="shareableUrl" class="url-input" readonly>
                     <button class="copy-btn" onclick="copyUrl()">复制</button>
+                    <button class="open-btn" onclick="openUrl()">打开</button>
                 </div>
                 <p id="copySuccess" class="success-message">复制成功!</p>
             </div>
@@ -239,7 +336,59 @@
         window.addEventListener('DOMContentLoaded', function() {
             // 初始化隐藏的学期字段
             updateSemester();
+            // 初始化密码开关事件
+            initPasswordToggle();
+            // 设置表单提交事件
+            setupFormSubmit();
         });
+        
+        // 初始化密码开关功能
+        function initPasswordToggle() {
+            const samePasswordCheckbox = document.getElementById('same_password');
+            const ssoPasswordInput = document.getElementById('sso_password');
+            
+            samePasswordCheckbox.addEventListener('change', function() {
+                if (this.checked) {
+                    ssoPasswordInput.disabled = true;
+                    ssoPasswordInput.placeholder = "已使用教务系统密码";
+                    ssoPasswordInput.value = ""; // 清空输入框
+                } else {
+                    ssoPasswordInput.disabled = false;
+                    ssoPasswordInput.placeholder = "可选，夜间时段(0:00-7:00)必填";
+                }
+            });
+        }
+        
+        // 设置表单提交事件
+        function setupFormSubmit() {
+            document.getElementById('downloadForm').addEventListener('submit', function(e) {
+                // 检查必填项
+                const userCode = document.getElementById('userCode').value;
+                const jwxtPassword = document.getElementById('jwxt_password').value;
+                
+                if (!userCode || !jwxtPassword) {
+                    e.preventDefault();
+                    alert('请填写所有必需的字段（学号、教务系统密码）');
+                    return false;
+                }
+                
+                // 处理密码同步
+                if (document.getElementById('same_password').checked) {
+                    // 如果使用相同密码，设置隐藏字段
+                    const hiddenSsoInput = document.getElementById('hidden_sso_password');
+                    if (!hiddenSsoInput) {
+                        const hiddenInput = document.createElement('input');
+                        hiddenInput.type = 'hidden';
+                        hiddenInput.id = 'hidden_sso_password';
+                        hiddenInput.name = 'sso_password';
+                        hiddenInput.value = jwxtPassword;
+                        this.appendChild(hiddenInput);
+                    } else {
+                        hiddenSsoInput.value = jwxtPassword;
+                    }
+                }
+            });
+        }
         
         // 更新学期选择
         function updateSemester() {
@@ -247,57 +396,15 @@
             document.getElementById('semester').value = selectedOption.value;
         }
         
-        // 学期选择变化时更新隐藏字段
-        document.getElementById('semester_select').addEventListener('change', updateSemester);
-        
         // 获取表单数据的通用函数
         function getFormData() {
             return {
                 userCode: document.getElementById('userCode').value,
                 jwxt_password: document.getElementById('jwxt_password').value,
-                sso_password: document.getElementById('sso_password').value,
+                sso_password: document.getElementById('same_password').checked ? document.getElementById('jwxt_password').value : document.getElementById('sso_password').value,
                 semester: document.getElementById('semester').value,
                 expire_days: document.getElementById('expire_days')?.value || ""
             };
-        }
-        
-        // 生成并下载ICS日历
-        function downloadICS() {
-            const formData = getFormData();
-            
-            // 验证必填字段
-            if (!formData.userCode || !formData.jwxt_password) {
-                alert('请填写所有必需的字段（学号、教务系统密码）');
-                return;
-            }
-            
-            fetch('/generate_ics', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(formData)
-            })
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text) });
-                }
-                return response.blob();
-            })
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                const filename = formData.userCode + '_schedule.ics';
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                a.remove();
-            })
-            .catch(error => {
-                alert('生成ICS失败: ' + error.message);
-            });
         }
         
         // 生成分享链接
@@ -357,6 +464,16 @@
             setTimeout(() => {
                 successMsg.style.display = 'none';
             }, 3000);
+        }
+
+        // 打开 URL
+        function openUrl() {
+            const urlInput = document.getElementById('shareableUrl').value;
+            if (urlInput) {
+                window.open(urlInput, '_blank');
+            } else {
+                alert('链接为空，请先生成链接');
+            }
         }
     </script>
 </body>
