@@ -23,6 +23,7 @@ from scau2ics.caldav import (
     generate_config,
     handle_caldav,
     set_decrypt_function,
+    verify_caldav_password,
 )
 from scau2ics.config import ENCRYPTION_SALT, URL_EXPIRE_DAYS, logger
 from scau2ics.ics import generate_ics
@@ -325,52 +326,74 @@ def generate_caldav_config():
         return Response(f"生成CalDAV配置时发生错误: {str(e)}", status=500)
 
 
-@app.route("/caldav/", methods=["PROPFIND", "OPTIONS"])
-@app.route("/caldav/<user_code>/", methods=["PROPFIND", "OPTIONS"])
+@app.route(
+    "/caldav/",
+    methods=[
+        "GET",
+        "PROPFIND",
+        "REPORT",
+        "OPTIONS",
+        "PUT",
+        "DELETE",
+        "MKCALENDAR",
+        "MOVE",
+        "COPY",
+    ],
+)
+@app.route(
+    "/caldav/<user_code>/",
+    methods=[
+        "GET",
+        "PROPFIND",
+        "REPORT",
+        "OPTIONS",
+        "PUT",
+        "DELETE",
+        "MKCALENDAR",
+        "MOVE",
+        "COPY",
+    ],
+)
 @app.route(
     "/caldav/<user_code>/calendar/",
-    methods=["GET", "PROPFIND", "REPORT", "OPTIONS"],
+    methods=[
+        "GET",
+        "PROPFIND",
+        "REPORT",
+        "OPTIONS",
+        "PUT",
+        "DELETE",
+        "MKCALENDAR",
+        "MOVE",
+        "COPY",
+    ],
 )
 @app.route(
     "/caldav/<user_code>/calendar/<path:resource_path>",
-    methods=["GET", "PROPFIND", "REPORT", "OPTIONS"],
+    methods=[
+        "GET",
+        "PROPFIND",
+        "REPORT",
+        "OPTIONS",
+        "PUT",
+        "DELETE",
+        "MKCALENDAR",
+        "MOVE",
+        "COPY",
+    ],
 )
+@caldav_auth.login_required
 def caldav_routes(user_code=None, resource_path=None):
     """处理CalDAV请求"""
     # 记录请求信息
     logger.info(f"收到CalDAV请求: {request.method} {request.path}")
-    if "Authorization" in request.headers:
-        logger.info(
-            f"请求包含Authorization头: {request.headers['Authorization'][:10]}..."
-        )
-    else:
-        logger.info("请求不包含Authorization头")
 
     # 对于OPTIONS请求，始终允许，无需认证
     if request.method == "OPTIONS":
         return handle_caldav(user_code, resource_path)
 
-    # 检查是否有Authorization头
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Basic "):
-        # 没有提供认证信息，返回401要求认证
-        logger.info(f"未提供认证信息，返回401")
-        return Response(
-            "需要认证",
-            status=401,
-            headers={"WWW-Authenticate": 'Basic realm="SCAU课表日历"'},
-        )
-
-    # 如果有认证信息，交给caldav_auth验证
+    # 从认证对象获取用户信息
     user_data = caldav_auth.current_user()
-    if user_data is None:
-        # 认证信息无效
-        logger.info(f"认证信息无效，返回401")
-        return Response(
-            "认证失败",
-            status=401,
-            headers={"WWW-Authenticate": 'Basic realm="SCAU课表日历"'},
-        )
 
     # 认证成功，记录用户信息
     logger.info(f"认证成功: 用户={user_data.get('userCode')}")
@@ -378,7 +401,13 @@ def caldav_routes(user_code=None, resource_path=None):
     # 如果访问特定用户的资源，验证用户身份
     if user_code and user_data.get("userCode") != user_code:
         logger.warning(f"用户{user_data.get('userCode')}尝试访问{user_code}的资源")
-        return Response("访问被拒绝", status=403)
+        return Response("Access denied", status=403)
+
+    # 添加环境变量用于认证，解决Missing configuration的问题
+    # 创建一个自定义的环境，确保WsgiDAV正确识别用户身份
+    request.environ["HTTP_AUTHORIZATION"] = request.headers.get("Authorization", "")
+    request.environ["wsgidav.auth.realm"] = "SCAU Calendar"
+    request.environ["wsgidav.auth.user_name"] = user_data.get("userCode", "")
 
     # 认证通过，处理请求
     return handle_caldav(user_code, resource_path)

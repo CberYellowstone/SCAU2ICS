@@ -1,15 +1,21 @@
 """
-SCAU2ICS CalDAV 服务模块 - 提供 CalDAV 服务功能
+SCAU2ICS CalDAV 服务模块 - 基于WsgiDAV实现纯虚拟CalDAV服务
 """
 
 import base64
 import json
-import logging
 import os
-from datetime import datetime
+import uuid
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 
 from flask import Response, request
 from flask_httpauth import HTTPBasicAuth
+# WsgiDAV导入
+from wsgidav import wsgidav_app
+from wsgidav.dav_provider import DAVCollection, DAVNonCollection, DAVProvider
+from wsgidav.dc.simple_dc import SimpleDomainController
+from wsgidav.util import get_content_length
 
 from scau2ics.config import logger
 from scau2ics.ics import generate_ics
@@ -18,14 +24,12 @@ from scau2ics.student import Student
 # 创建CalDAV认证对象
 caldav_auth = HTTPBasicAuth()
 
-# CalDAV XML命名空间
-DAV_NS = {
-    "D": "DAV:",
-    "C": "urn:ietf:params:xml:ns:caldav",
-    "CS": "http://calendarserver.org/ns/",
-    "ICAL": "http://apple.com/ns/ical/",
+# XML命名空间定义
+NAMESPACES = {
+    "DAV:": "D:",
+    "urn:ietf:params:xml:ns:caldav": "C:",
+    "http://apple.com/ns/ical/": "ICAL:",
 }
-
 
 # CalDAV认证回调
 @caldav_auth.verify_password
@@ -96,292 +100,431 @@ def generate_caldav_password(
     return token
 
 
-# 处理CalDAV OPTIONS请求
-def _handle_options():
-    """处理OPTIONS请求"""
-    logger.info("处理OPTIONS请求")
+# 虚拟CalDAV提供者
+class VirtualCalDAVProvider(DAVProvider):
+    """纯虚拟CalDAV提供者，不使用文件系统"""
 
-    response = Response("")
-    response.headers.add("DAV", "1, 2, 3, calendar-access")
-    response.headers.add("Allow", "OPTIONS, GET, PROPFIND, REPORT")
-    response.headers.add("Content-Length", "0")
-    return response
+    def __init__(self):
+        super().__init__()
+        self.user_cache = {}  # 可选的内存缓存
+
+    def get_resource_inst(self, path, environ):
+        """根据路径返回相应的虚拟资源"""
+        logger.info(f"获取资源: {path}")
+
+        # 解析路径 (如 /202325310229/calendar/)
+        path_parts = path.strip("/").split("/")
+
+        if len(path_parts) == 0 or path_parts[0] == "":
+            logger.info("返回根路径")
+            # 根路径，返回根集合
+            return VirtualRootCollection(path, environ)
+
+        user_code = path_parts[0]
+
+        # 获取用户数据（从environ中）
+        user_data = environ.get("scau2ics.user_data", {})
+        logger.info(f"用户数据: {user_data}")
+
+        if len(path_parts) == 1:
+            # 用户路径 (/202325310229)
+            return VirtualUserCollection(path, environ, user_code)
+
+        if len(path_parts) >= 2 and path_parts[1] == "calendar":
+            if len(path_parts) == 2 or (len(path_parts) == 3 and path_parts[2] == ""):
+                # 日历路径 (/202325310229/calendar or /202325310229/calendar/)
+                logger.info("返回日历集合")
+                return VirtualCalendarCollection(path, environ, user_code, user_data)
+            else:
+                # 日历资源 (/202325310229/calendar/events.ics)
+                return VirtualCalendarResource(path, environ, user_code, user_data)
+
+        return None  # 未知路径返回None
 
 
-# 处理CalDAV PROPFIND请求
-def _handle_propfind(user_code, resource_path):
-    """处理PROPFIND请求"""
-    try:
-        # 记录请求详情以便调试
-        depth = request.headers.get("Depth", "0")
+# 虚拟根集合
+class VirtualRootCollection(DAVCollection):
+    """根集合，显示所有用户"""
+
+    def __init__(self, path, environ):
+        super().__init__(path, environ)
+        self.environ = environ
+
+    def get_display_info(self):
+        return {"type": "虚拟根目录"}
+
+    def get_member_names(self):
+        """返回所有用户名称"""
+        # 从环境中获取当前用户，只显示当前用户
+        user_data = self.environ.get("scau2ics.user_data", {})
+        user_code = user_data.get("userCode")
+        return [user_code] if user_code else []
+
+    def get_member(self, name):
+        """获取指定名称的成员"""
+        user_data = self.environ.get("scau2ics.user_data", {})
+        user_code = user_data.get("userCode")
+        if user_code and name == user_code:
+            path = f"/{name}"
+            return VirtualUserCollection(path, self.environ, name)
+        return None
+
+    def get_properties(self, mode=None, name_list=None):
+        """返回集合属性
+
+        Args:
+            mode: 属性模式 ("allprop", "named", ...)
+            name_list: 如果mode="named"，需要返回的属性名称列表
+        """
+        props = {
+            "D:displayname": "SCAU2ICS日历",
+            "D:resourcetype": "<D:collection/>",
+        }
+
+        # 如果mode是named，只返回请求的属性
+        if mode == "named" and name_list:
+            return {k: v for k, v in props.items() if k in name_list}
+        return props
+
+
+# 虚拟用户集合
+class VirtualUserCollection(DAVCollection):
+    """用户集合，包含日历集合"""
+
+    def __init__(self, path, environ, user_code):
+        super().__init__(path, environ)
+        self.user_code = user_code
+        self.environ = environ
+
+    def get_display_info(self):
+        return {"type": "用户目录"}
+
+    def get_member_names(self):
+        """返回成员名称列表"""
+        return ["calendar"]
+
+    def get_member(self, name):
+        """获取指定名称的成员"""
+        if name == "calendar":
+            path = f"{self.path}/calendar"
+            user_data = self.environ.get("scau2ics.user_data", {})
+            return VirtualCalendarCollection(
+                path, self.environ, self.user_code, user_data
+            )
+        return None
+
+    def get_properties(self, mode=None, name_list=None):
+        """返回集合属性
+
+        Args:
+            mode: 属性模式 ("allprop", "named", ...)
+            name_list: 如果mode="named"，需要返回的属性名称列表
+        """
+        # 记录请求的属性
+        if name_list:
+            logger.info(f"获取用户集合属性，模式: {mode}, 名称列表: {name_list}")
+
+        # 基本属性
+        props = {
+            "{DAV:}displayname": f"用户 {self.user_code}",
+            "{DAV:}resourcetype": "<D:collection/>",
+            # calendar-home-set 应该指向用户的主目录，即当前集合
+            # 确保使用正确的路径，考虑 mount_path
+            "{urn:ietf:params:xml:ns:caldav}calendar-home-set": f"<D:href>{self.get_href()}</D:href>",
+        }
         logger.info(
-            f"处理PROPFIND请求: user_code={user_code}, path={resource_path}, depth={depth}"
+            f"添加calendar-home-set属性: {props['{urn:ietf:params:xml:ns:caldav}calendar-home-set']}"
         )
 
-        # 构建基本的多状态XML响应 - 注意不要使用中文字符，避免编码问题
-        xml_response = """<?xml version="1.0" encoding="utf-8"?>
-<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CS="http://calendarserver.org/ns/" xmlns:ICAL="http://apple.com/ns/ical/">"""
-
-        # 根据请求路径构建不同的响应
-        if user_code is None:
-            # 根目录
-            xml_response += """
-  <D:response>
-    <D:href>/caldav/</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:resourcetype><D:collection/></D:resourcetype>
-        <D:displayname>Calendar Root</D:displayname>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
-
-            # 如果深度大于0，添加用户目录
-            if depth != "0":
-                xml_response += f"""
-  <D:response>
-    <D:href>/caldav/{user_code}/</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:resourcetype><D:collection/></D:resourcetype>
-        <D:displayname>User Calendar</D:displayname>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
-
-        elif resource_path is None:
-            # 用户目录
-            xml_response += f"""
-  <D:response>
-    <D:href>/caldav/{user_code}/</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:resourcetype><D:collection/></D:resourcetype>
-        <D:displayname>User Calendar</D:displayname>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
-
-            # 如果深度大于0，添加日历集合
-            if depth != "0":
-                xml_response += f"""
-  <D:response>
-    <D:href>/caldav/{user_code}/calendar/</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:resourcetype>
-          <D:collection/>
-          <C:calendar/>
-        </D:resourcetype>
-        <D:displayname>SCAU Schedule</D:displayname>
-        <C:calendar-description>SCAU Schedule - {user_code}</C:calendar-description>
-        <ICAL:calendar-color>#0082C9</ICAL:calendar-color>
-        <C:supported-calendar-component-set>
-          <C:comp name="VEVENT"/>
-        </C:supported-calendar-component-set>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
-
-        elif resource_path == "calendar/" or resource_path == "calendar":
-            # 日历集合
-            user_data = caldav_auth.current_user()
-            semester_info = user_data.get("semester", "")
-            display_name = f"SCAU Schedule - {user_code}"
-            if semester_info:
-                display_name = f"{display_name} - {semester_info}"
-
-            xml_response += f"""
-  <D:response>
-    <D:href>/caldav/{user_code}/calendar/</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:resourcetype>
-          <D:collection/>
-          <C:calendar/>
-        </D:resourcetype>
-        <D:displayname>{display_name}</D:displayname>
-        <C:calendar-description>SCAU Schedule - {user_code}</C:calendar-description>
-        <ICAL:calendar-color>#0082C9</ICAL:calendar-color>
-        <C:supported-calendar-component-set>
-          <C:comp name="VEVENT"/>
-        </C:supported-calendar-component-set>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
-
-            # 如果深度大于0，添加日历文件
-            if depth != "0":
-                xml_response += f"""
-  <D:response>
-    <D:href>/caldav/{user_code}/calendar/calendar.ics</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:getcontenttype>text/calendar; charset=utf-8</D:getcontenttype>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
-
+        # 日志记录返回的属性
+        if mode == "named" and name_list:
+            result = {k: v for k, v in props.items() if k in name_list}
         else:
-            # 日历资源，如calendar.ics文件
-            xml_response += f"""
-  <D:response>
-    <D:href>/caldav/{user_code}/calendar/{resource_path}</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:getcontenttype>text/calendar; charset=utf-8</D:getcontenttype>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>"""
+            result = props
 
-        # 关闭XML标签
-        xml_response += """
-</D:multistatus>"""
-
-        # 返回XML响应
-        response = Response(xml_response, mimetype="application/xml")
-        response.headers.add("Content-Type", "application/xml; charset=utf-8")
-        return response
-
-    except Exception as e:
-        logger.error(f"处理PROPFIND请求错误: {str(e)}")
-        return Response(f"处理PROPFIND请求错误", status=500)
+        logger.info(f"返回用户集合属性: {result}")
+        return result
 
 
-# 处理CalDAV REPORT请求
-def _handle_report(user_code, resource_path):
-    """处理REPORT请求"""
-    try:
-        logger.info(
-            f"处理REPORT请求: user_code={user_code}, resource_path={resource_path}"
-        )
+# 虚拟日历集合
+class VirtualCalendarCollection(DAVCollection):
+    """日历集合，动态生成"""
 
-        # 获取用户认证信息并生成ICS内容
-        user_data = caldav_auth.current_user()
+    def __init__(self, path, environ, user_code, user_data):
+        logger.info(f"创建日历集合: {path}, 用户: {user_code}")
+        super().__init__(path, environ)
+        self.user_code = user_code
+        self.user_data = user_data
+        self.environ = environ
 
-        if user_data is None:
-            logger.error("处理REPORT请求时未能获取用户数据")
-            return Response(
-                "Authentication required",
-                status=401,
-                headers={"WWW-Authenticate": 'Basic realm="SCAU Calendar"'},
+    def get_display_info(self):
+        return {"type": "日历集合"}
+
+    def get_member_names(self):
+        """返回成员名称列表"""
+        # 确保至少返回一个固定的日历文件名
+        logger.info("获取成员名称列表")
+        return ["calendar.ics"]
+
+    def get_member(self, name):
+        """获取指定名称的成员"""
+        logger.info(f"获取成员: {name}")
+        if name == "calendar.ics":
+            path = f"{self.path}/{name}"
+            return VirtualCalendarResource(
+                path, self.environ, self.user_code, self.user_data
             )
+        return None
 
-        ics_content = _generate_ics_content(
-            user_code,
-            user_data.get("jwxt_password", ""),
-            user_data.get("sso_password", ""),
-            user_data.get("semester", ""),
-        )
+    def get_properties(self, mode=None, name_list=None):
+        """返回日历属性 (修正：返回字典)
 
-        # 构建XML响应 - 不直接包含ICS内容，避免XML解析问题
-        xml_response = f"""<?xml version="1.0" encoding="utf-8"?>
-<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
-  <D:response>
-    <D:href>/caldav/{user_code}/calendar/calendar.ics</D:href>
-    <D:propstat>
-      <D:prop>
-        <D:getetag>"etag-{datetime.now().isoformat()}"</D:getetag>
-      </D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>
-</D:multistatus>"""
+        Args:
+            mode: 属性模式 ("allprop", "named", ...)
+            name_list: 如果mode="named"，需要返回的属性名称列表
+        """
+        logger.info(f"获取日历属性，模式: {mode}, 名称列表: {name_list}")
+        semester = self.user_data.get("semester", "")
+        display_name = f"SCAU课表 - {self.user_code}"
+        if semester:
+            display_name = f"{display_name} - {semester}"
 
-        # 返回XML响应
-        response = Response(xml_response, mimetype="application/xml")
-        response.headers.add("Content-Type", "application/xml; charset=utf-8")
-        return response
+        # 属性以字典形式返回
+        props = {
+            "{DAV:}displayname": display_name,
+            "{DAV:}resourcetype": "<D:collection/><C:calendar/>",
+            "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": "<C:comp name='VEVENT'/>",
+            "{urn:ietf:params:xml:ns:caldav}calendar-description": f"华南农业大学课表 {self.user_code}",
+            "{http://apple.com/ns/ical/}calendar-color": "#0082C9",
+            "{urn:ietf:params:xml:ns:caldav}calendar-timezone": "",  # 时区信息，可以根据需要添加
+            "{DAV:}owner": f"<D:href>/caldav/{self.user_code}/</D:href>",  # 指向用户集合
+        }
 
-    except Exception as e:
-        logger.error(f"处理REPORT请求错误: {str(e)}")
-        return Response("Error processing REPORT request", status=500)
+        # 如果mode是named，只返回请求的属性
+        if mode == "named" and name_list:
+            result = {k: v for k, v in props.items() if k in name_list}
+            logger.info(f"日历集合返回属性(筛选后): {result}")
+            return result
+
+        logger.info(f"日历集合返回属性(全部): {props}")
+        return props
 
 
-# 处理CalDAV GET请求
-def _handle_get(user_code, resource_path):
-    """处理GET请求"""
-    try:
-        logger.info(
-            f"处理GET请求: user_code={user_code}, resource_path={resource_path}"
-        )
+# 虚拟日历资源
+class VirtualCalendarResource(DAVNonCollection):
+    """日历资源，动态生成ICS内容"""
 
-        # 获取用户认证信息并生成ICS内容
-        user_data = caldav_auth.current_user()
+    def __init__(self, path, environ, user_code, user_data):
+        super().__init__(path, environ)
+        self.user_code = user_code
+        self.user_data = user_data
+        self.environ = environ
+        self._content = None  # 延迟初始化内容
+        self._etag = None
 
-        if user_data is None:
-            logger.error("处理GET请求时未能获取用户数据")
-            return Response(
-                "认证失败",
-                status=401,
-                headers={"WWW-Authenticate": 'Basic realm="SCAU课表日历"'},
+    def get_content(self):
+        """获取ICS内容（动态生成，修正：返回可迭代对象）"""
+        if self._content is None:
+            # 只在需要时生成ICS内容
+            self._content = self._generate_ics_content()
+        # WSGI需要返回可迭代的字节串
+        return [self._content]
+
+    def get_content_length(self):
+        """获取内容长度"""
+        content = self.get_content()
+        return len(content[0]) if content else 0
+
+    def get_content_type(self):
+        """返回内容类型"""
+        return "text/calendar; charset=utf-8"
+
+    def get_creation_date(self):
+        """返回创建日期"""
+        return datetime.now()
+
+    def get_last_modified(self):
+        """返回最后修改日期"""
+        return datetime.now()
+
+    def get_etag(self):
+        """返回ETag"""
+        if self._etag is None:
+            # 生成一个基于内容的ETag
+            self._etag = f'"{uuid.uuid4().hex}"'
+        return self._etag
+
+    def _generate_ics_content(self):
+        """生成ICS内容"""
+        try:
+            # 从用户数据中提取信息
+            jwxt_password = self.user_data.get("jwxt_password", "")
+            sso_password = self.user_data.get("sso_password", "")
+            semester = self.user_data.get("semester", "")
+
+            # 创建Student对象并生成ICS内容
+            student = Student(self.user_code, jwxt_password, sso_password)
+            ics_content = generate_ics(student, semester)
+
+            logger.info(
+                f"为用户 {self.user_code} 生成ICS内容成功，长度: {len(ics_content)}"
             )
+            return ics_content.encode("utf-8")  # 返回字节
+        except Exception as e:
+            logger.error(f"生成ICS内容失败: {str(e)}")
+            # 返回简单的错误ICS
+            error_ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//SCAU2ICS//ERROR//\r\nEND:VCALENDAR\r\n"
+            return error_ics.encode("utf-8")
 
-        ics_content = _generate_ics_content(
-            user_code,
-            user_data.get("jwxt_password", ""),
-            user_data.get("sso_password", ""),
-            user_data.get("semester", ""),
-        )
+    def get_properties(self, mode=None, name_list=None):
+        """返回资源属性 (修正：添加resourcetype，getcontentlength转为字符串)
 
-        # 返回ICS文件内容
-        response = Response(ics_content, mimetype="text/calendar")
-        response.headers.add("Content-Type", "text/calendar; charset=utf-8")
-        return response
+        Args:
+            mode: 属性模式 ("allprop", "named", ...)
+            name_list: 如果mode="named"，需要返回的属性名称列表
+        """
+        props = {
+            "{DAV:}displayname": "calendar.ics",
+            "{DAV:}resourcetype": "",  # 非集合资源类型为空
+            "{DAV:}getcontenttype": self.get_content_type(),
+            "{DAV:}getcontentlength": str(
+                self.get_content_length()
+            ),  # 属性值应为字符串
+            "{DAV:}getetag": self.get_etag(),
+            "{DAV:}getlastmodified": self.get_last_modified().strftime(
+                "%a, %d %b %Y %H:%M:%S GMT"
+            ),
+        }
 
-    except Exception as e:
-        logger.error(f"处理GET请求错误: {str(e)}")
-        return Response(f"处理GET请求错误: {str(e)}", status=500)
-
-
-# 从Student对象生成ICS内容
-def _generate_ics_content(user_code, jwxt_password, sso_password, semester):
-    """从Student对象生成ICS内容"""
-    try:
-        logger.info(f"为用户 {user_code} 生成ICS内容, 学期: {semester}")
-
-        # 创建Student对象并生成ICS内容
-        student = Student(user_code, jwxt_password, sso_password)
-        ics_content = generate_ics(student, semester)
-
-        logger.info(f"成功生成ICS内容，长度: {len(ics_content)}")
-        return ics_content
-    except Exception as e:
-        logger.error(f"生成ICS内容失败: {str(e)}")
-        raise
+        # 如果mode是named，只返回请求的属性
+        if mode == "named" and name_list:
+            return {k: v for k, v in props.items() if k in name_list}
+        return props
 
 
-# 处理CalDAV请求的主函数
+# 创建WsgiDAV应用
+def create_caldav_app():
+    """创建WsgiDAV应用"""
+    config = {
+        "provider_mapping": {"/": VirtualCalDAVProvider()},
+        "mount_path": "/caldav",
+        "verbose": 1,
+        # 完全禁用认证 - 因为我们已经在Flask层面处理了认证
+        "http_authenticator": {
+            "accept_basic": False,
+            "accept_digest": False,
+            "default_to_digest": False,
+            "trusted_auth_header": None,
+        },
+        # 简单域控制器配置
+        "simple_dc": {
+            "user_mapping": {"*": True},  # 允许所有访问
+        },
+        "logging": {
+            "enable_loggers": [],
+        },
+        "lock_storage": None,  # 不需要锁管理（只读）
+    }
+    return wsgidav_app.WsgiDAVApp(config)
+
+
+# 全局应用实例
+caldav_app = create_caldav_app()
+
+
+# 处理CalDAV请求
 def handle_caldav(user_code=None, resource_path=None):
     """处理CalDAV请求"""
-    # 记录请求详情
-    logger.info(
-        f"收到CalDAV请求: method={request.method}, user_code={user_code}, path={resource_path}"
-    )
-
-    # OPTIONS 请求特殊处理
+    # 对于OPTIONS请求，特殊处理提供正确的headers
     if request.method == "OPTIONS":
-        return _handle_options()
+        response = Response("")
+        response.headers.add("DAV", "1, 2, 3, calendar-access")
+        response.headers.add(
+            "Allow",
+            "OPTIONS, GET, PROPFIND, REPORT",
+        )
+        response.headers.add("Content-Length", "0")
+        return response
 
-    # 根据请求方法分发处理
-    if request.method == "PROPFIND":
-        return _handle_propfind(user_code, resource_path)
-    elif request.method == "REPORT":
-        return _handle_report(user_code, resource_path)
-    elif request.method == "GET":
-        return _handle_get(user_code, resource_path)
-    else:
-        return Response("不支持的方法", status=405)
+    # 获取用户认证信息
+    user_data = caldav_auth.current_user()
+    if user_data is None:
+        logger.error("处理CalDAV请求时未能获取用户数据")
+        return Response(
+            "Authentication required",
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="SCAU Calendar"'},
+        )
+
+    try:
+        # 准备环境变量
+        environ = request.environ.copy()
+
+        # 添加用户信息到环境
+        environ["scau2ics.user_data"] = user_data
+
+        # 修改路径
+        if resource_path:
+            path_info = f"/{user_code}/calendar/{resource_path}"
+        elif user_code:
+            path_info = f"/{user_code}/calendar/"
+        else:
+            path_info = "/"
+        environ["PATH_INFO"] = path_info
+
+        logger.info(f"准备处理CalDAV请求: PATH_INFO={path_info}")
+
+        # 调用WsgiDAV应用
+        def start_response(status, headers, exc_info=None):
+            """WSGI响应函数
+
+            Args:
+                status: HTTP状态码字符串，如 "200 OK"
+                headers: HTTP头部列表，每个元素为(name, value)元组
+                exc_info: 可选的异常信息，用于错误处理
+            """
+            nonlocal response_status, response_headers
+            response_status = status
+            response_headers = headers
+            return lambda x: None
+
+        # 初始化响应变量
+        response_status = "200 OK"
+        response_headers = []
+
+        # 收集响应体
+        body_parts = []
+        for chunk in caldav_app(environ, start_response):
+            if chunk:
+                body_parts.append(
+                    chunk if isinstance(chunk, bytes) else chunk.encode("utf-8")
+                )
+
+        # 组合响应体
+        body = b"".join(body_parts)
+
+        # 提取状态码
+        status_code = int(response_status.split()[0])
+
+        # 创建Flask响应
+        response = Response(body, status=status_code)
+
+        # 添加响应头
+        for name, value in response_headers:
+            response.headers.add(name, value)
+
+        logger.info(f"CalDAV响应: 状态={status_code}, 内容长度={len(body)}")
+        return response
+
+    except Exception as e:
+        logger.error(f"处理CalDAV请求失败: {str(e)}")
+        import traceback
+
+        logger.error(traceback.format_exc())
+        return Response(f"处理CalDAV请求失败: {str(e)}", status=500)
 
 
-# 生成CalDAV配置的API函数
+# 生成CalDAV配置
 def generate_config(encrypt_data, request_data, request_url_root):
     """生成CalDAV配置"""
     try:
