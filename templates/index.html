@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <title>SCAU2ICS - 华南农业大学课表导出为ICS日历</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        /* 基础样式 */
         body {
             font-family: Arial, sans-serif;
             margin: 40px;
@@ -13,8 +13,7 @@
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
-        }
-
+        }        /* 标题和容器样式 */
         h1 {
             color: #4CAF50;
         }
@@ -35,8 +34,7 @@
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
+        }        /* 代码和文本格式 */
         code {
             background-color: #f5f5f5;
             padding: 2px 4px;
@@ -50,6 +48,7 @@
             overflow-x: auto;
         }
 
+        /* 表单元素样式 */
         .form-group {
             margin-bottom: 15px;
         }
@@ -67,9 +66,7 @@
             border: 1px solid #ddd;
             border-radius: 4px;
             box-sizing: border-box;
-        }
-
-        /* 复选框样式 */
+        }        /* 复选框和按钮样式 */
         .checkbox-group {
             margin: 5px 0;
         }
@@ -435,10 +432,26 @@
             border: 1px solid #c8e6c9;
             transition: all 0.2s ease;
         }
-        
-        .preset-tag:hover {
+          .preset-tag:hover {
             background-color: #e8f5e9;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* API文档中预置关键词样式 */
+        .preset-keywords {
+            display: block;
+            margin: 8px 0 8px 15px;
+            line-height: 1.8;
+        }
+        
+        .keyword-item {
+            display: inline-flex;
+            align-items: center;
+            background-color: #f5f5f5;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin: 3px 2px;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -541,19 +554,25 @@
         <div class="card api-doc">
             <h2>API使用说明</h2>
             <p>使用POST请求访问 <code>/generate_ics</code> 接口生成ICS文件。</p>
-            <h3>请求格式示例:</h3>
-            <pre>
+            <h3>请求格式示例:</h3>            <pre>
 {
     "userCode": "2023XXXXXXXX",
     "jwxt_password": "教务系统密码",
-    "sso_password": "统一身份认证密码（可选）",
+    "sso_password": "统一身份认证密码",
     "semester": "{{ SEMESTERS[0]['label'] }}",
-    "filter_keywords": [0, 1, "实验课", "讨论课"]
+    "filter_keywords": [0, 1, "实验课", "讨论课"],
+    "expire_days": 30
 }
-            </pre>
-            <p>其中 <code>sso_password</code> 是可选的，但在0点至7点之间需要提供。</p>
-            <p><code>semester</code> 是学期代码，如"2024-2025-2"，用于从教务系统获取特定学期的课表数据</p>
-            <p><code>filter_keywords</code> 是可选的过滤关键词列表，用于排除课程名称中包含这些关键词的课程。整数 0 表示"重修"，1 表示"免听"，字符串表示自定义过滤词。</p>
+            </pre>            <p><code>sso_password</code> 可选，统一身份认证密码。提供后才能在0点至7点之间获取最新数据。</p>
+            <p><code>semester</code> 学期代码，如"2024-2025-2"，用于从教务系统获取特定学期的课表数据</p>
+            <p><code>filter_keywords</code> 可选，过滤关键词列表，用于排除包含关键词的课程。可传入int调用预置关键词：
+                <span class="preset-keywords">
+                {% for key, value in PRESET_FILTERS.items() %}
+                <span class="keyword-item"><code>{{ key }}</code>: {{ value }}</span>{% if not loop.last %} {% endif %}
+                {% endfor %}
+                </span>
+            </p>
+            <p><code>expire_days</code> 可选，链接有效期，单位为天，0表示永不过期。</p>
             <h3>生成共享链接</h3>
             <p>使用POST请求访问 <code>/generate_url</code> 接口生成加密链接，请求格式与上面相同。</p>
             <p>返回的链接可以通过GET请求直接访问，无需再次输入密码。链接有效期为30天。</p>
