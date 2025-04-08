@@ -12,7 +12,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from scau2ics.browser import get_browser_manager
-from scau2ics.config import CACHE_DIR, CLASS_TIMES, JWXT_URL, JWXT_URL_BACKUP, logger
+from scau2ics.config import (
+    CACHE_DIR,
+    CLASS_TIMES,
+    DISABLE_BROWSER,
+    DISABLE_CACHE,
+    JWXT_URL,
+    JWXT_URL_BACKUP,
+    logger,
+)
 from scau2ics.utils import (
     get_cache_timestamp,
     get_captcha,
@@ -78,7 +86,12 @@ class Student:
         return f"{self.base_cache_file}_{semester}.json"
 
     def _is_night_time(self) -> bool:
-        """判断当前是否为夜间时段（0点至7点）"""
+        """判断当前是否为夜间时段（0点至7点）或浏览器模式被禁用"""
+        # 如果禁用了浏览器模式，始终返回True，这样会强制使用缓存
+        if DISABLE_BROWSER:
+            logger.info("浏览器模式已禁用，将使用缓存模式")
+            return False
+
         current_time = datetime.datetime.now(TZ_UTC8).time()
         return NIGHT_START <= current_time <= NIGHT_END
 
@@ -96,6 +109,13 @@ class Student:
 
     def _try_use_cache(self, error_msg: str = "") -> None:
         """尝试使用缓存数据"""
+        # 如果禁用了缓存，则抛出异常
+        if DISABLE_CACHE:
+            msg = "无法登录且缓存功能已禁用"
+            if error_msg:
+                msg += f": {error_msg}"
+            raise Exception(msg)
+
         # 检查是否存在任何学期的缓存文件
         cache_files = [
             f for f in os.listdir(CACHE_DIR) if f.startswith(f"cache_{self.userCode}_")
@@ -247,11 +267,16 @@ class Student:
             cache_file = self._get_cache_file_for_semester(semester)
 
             course_schedule = self._fetch_course_schedule(semester)
-            # 保存到特定学期的缓存文件
-            save_json_cache(cache_file, course_schedule)
+
+            # 保存到特定学期的缓存文件（如果缓存未禁用）
+            if not DISABLE_CACHE:
+                save_json_cache(cache_file, course_schedule)
             return course_schedule
         except Exception as e:
             logger.error(f"获取课表失败: {str(e)}")
+            # 如果缓存被禁用，直接抛出异常
+            if DISABLE_CACHE:
+                raise Exception(f"获取课表失败，且缓存功能已禁用: {str(e)}")
             return self._load_cached_schedule(semester, str(e))
 
     def _fetch_course_schedule(self, semester) -> Dict[str, Any]:

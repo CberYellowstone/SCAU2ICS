@@ -14,7 +14,7 @@ import requests
 import urllib3
 from PIL import Image
 
-from scau2ics.config import JWXT_URL, logger
+from scau2ics.config import DISABLE_CACHE, JWXT_URL, logger
 
 # 禁用SSL警告
 urllib3.disable_warnings()
@@ -79,6 +79,11 @@ def save_json_cache(file_path: str, data: Dict[str, Any]) -> None:
         file_path: 缓存文件路径
         data: 要缓存的数据
     """
+    # 如果缓存被禁用，则不进行任何操作
+    if DISABLE_CACHE:
+        logger.info("缓存功能已禁用，跳过保存数据")
+        return
+
     try:
         cache_data = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -99,8 +104,13 @@ def load_json_cache(file_path: str) -> Optional[Dict[str, Any]]:
         file_path: 缓存文件路径
 
     Returns:
-        缓存数据或None（如果加载失败）
+        缓存数据或None（如果加载失败或缓存被禁用）
     """
+    # 如果缓存被禁用，返回None
+    if DISABLE_CACHE:
+        logger.info("缓存功能已禁用，跳过加载数据")
+        return None
+
     if not os.path.exists(file_path):
         return None
 
@@ -126,6 +136,10 @@ def get_cache_timestamp(file_path: str) -> Optional[str]:
     Returns:
         时间戳字符串或None
     """
+    if DISABLE_CACHE:
+        logger.info("缓存功能已禁用，无法获取缓存时间戳")
+        return None
+
     cache_data = load_json_cache(file_path)
     return cache_data.get("timestamp") if cache_data else None
 

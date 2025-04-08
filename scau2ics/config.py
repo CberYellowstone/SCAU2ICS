@@ -22,6 +22,14 @@ JWXT_URL_BACKUP = "https://jwxt-scau-edu-cn-s.vpn.scau.edu.cn"
 ENCRYPTION_SALT = "SCAU2ICS_SALT_FOR_SECURE_URLS"  # 用于URL加密的盐值
 URL_EXPIRE_DAYS = 30  # URL有效期（天）
 
+# 浏览器模式配置
+DISABLE_BROWSER = False  # 是否禁用浏览器模式，True时永远不调用统一身份认证登录和浏览器
+
+# 缓存配置
+DISABLE_CACHE = False
+# 是否禁用文件缓存，True时不会读写缓存文件，适用于只读文件系统环境
+
+
 # 预置的过滤词字典，整数 -> 字符串
 PRESET_FILTERS = {0: "重修", 1: "免听", 2: "实验"}
 

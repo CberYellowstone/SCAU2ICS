@@ -9,9 +9,21 @@ import threading
 import time
 import traceback
 
-from playwright.sync_api import Page, sync_playwright
+from scau2ics.config import DISABLE_BROWSER, logger
 
-from scau2ics.config import logger
+# 只在浏览器模式启用时导入playwright
+if not DISABLE_BROWSER:
+    try:
+        from playwright.sync_api import Page, sync_playwright
+    except ImportError:
+        # 如果无法导入playwright，但浏览器模式被禁用，仍然可以继续
+        logger.warning("无法导入playwright模块，但浏览器模式已被禁用，将仅使用缓存模式")
+else:
+    # 如果浏览器模式被禁用，确保playwright模块不被导入
+    logger.info("浏览器模式已禁用，将不会导入playwright模块")
+
+    class Page:  # type: ignore[no-redef]
+        pass
 
 
 class BrowserThread(threading.Thread):
@@ -299,6 +311,10 @@ class BrowserManager:
         Returns:
             tuple: (session, cookies)
         """
+        if DISABLE_BROWSER:
+            logger.warning("浏览器模式已禁用，无法执行SSO登录")
+            return None, {}
+
         result = self.execute_in_browser_thread(
             self.get_page(), url, username, password
         )
