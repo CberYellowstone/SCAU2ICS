@@ -346,7 +346,7 @@ class Student:
             day_of_week = int(course.get("pksj", "10000")[0]) - 1
 
             course_info = CourseInfo(
-                course_name=f"{course['kc_name']}[{course['xslx_name1']}]",
+                course_name=f"{course['kc_name']}({course['xslx_name1']})",
                 class_name=course["ktmc_name"],
                 course_id=course["id"],
                 course_weeks=course["pkzc_1"],

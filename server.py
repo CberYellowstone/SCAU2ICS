@@ -8,6 +8,7 @@ import binascii
 import hashlib
 import json
 import re
+import zlib
 from datetime import datetime
 from datetime import time as dt_time
 from datetime import timedelta
@@ -48,11 +49,14 @@ def generate_key_from_salt(salt: str) -> bytes:
 
 def encrypt_data(data: Dict, expire_days: Optional[int] = None) -> str:
     """
-    加密数据
+    加密数据并进行压缩，生成token
 
     Args:
         data: 要加密的数据字典
         expire_days: 过期天数，None表示使用默认配置，0表示永不过期
+
+    Returns:
+        str: base64编码的压缩加密token
     """
     key = generate_key_from_salt(ENCRYPTION_SALT)
     fernet = Fernet(key)
@@ -67,18 +71,31 @@ def encrypt_data(data: Dict, expire_days: Optional[int] = None) -> str:
     # 加密JSON数据
     json_data = json.dumps(data)
     encrypted = fernet.encrypt(json_data.encode())
-    return base64.urlsafe_b64encode(encrypted).decode()
+    compressed = zlib.compress(encrypted, level=9)
+    return base64.urlsafe_b64encode(compressed).decode()
 
 
 def decrypt_data(encrypted_token: str) -> Dict:
-    """解密数据"""
+    """
+    解密压缩的token数据
+
+    Args:
+        encrypted_token: base64编码的压缩加密token
+
+    Returns:
+        Dict: 解密后的数据字典
+
+    Raises:
+        ValueError: 当token无效、解密失败或已过期时
+    """
     key = generate_key_from_salt(ENCRYPTION_SALT)
     fernet = Fernet(key)
 
     try:
-        # 解码并解密
+        # 解码、解压缩并解密
         decoded = base64.urlsafe_b64decode(encrypted_token)
-        decrypted_data = fernet.decrypt(decoded).decode()
+        decompressed = zlib.decompress(decoded)
+        decrypted_data = fernet.decrypt(decompressed).decode()
         data = json.loads(decrypted_data)
 
         # 检查过期时间
@@ -88,7 +105,7 @@ def decrypt_data(encrypted_token: str) -> Dict:
                 raise ValueError("URL已过期")
 
         return data
-    except (binascii.Error, cryptography.fernet.InvalidToken) as e:
+    except (binascii.Error, cryptography.fernet.InvalidToken, zlib.error) as e:
         logger.error(f"解密失败: {str(e)}")
         raise ValueError(f"无效或已过期的URL: {str(e)}")
 

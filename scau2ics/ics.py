@@ -13,7 +13,7 @@ from scau2ics.student import CourseInfo, Student
 ICS_FILE_HEADER = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//SCAU2ICS//EN",
+    "PRODID:-//SCAU2ICS//ZH-CN//SCAU课程表",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
 ]
@@ -52,6 +52,8 @@ def generate_ics(
 
     # 构建ICS内容
     ics_content = ICS_FILE_HEADER.copy()
+
+    ics_content.append(f"X-WR-CALNAME:{student.userCode}_{semester}课表")
 
     # 添加课表更新时间提示事件
     add_update_time_events(ics_content, cache_update_time)
@@ -144,7 +146,7 @@ def add_course_events(
         event_props = {
             "summary": summary,
             "description": f"{course_info.teacher_name} | {course_info.class_name}",
-            "location": course_info.classroom or "-",
+            "location": course_info.classroom or "null",
             "day_of_week": course_info.day_of_week,
             "start_hour": start_hour,
             "start_minute": start_minute,
