@@ -19,7 +19,13 @@ from cryptography.fernet import Fernet
 from flask import Flask, Response, render_template, request, url_for
 
 # 本地模块导入
-from scau2ics.config import ENCRYPTION_SALT, PRESET_FILTERS, URL_EXPIRE_DAYS, logger
+from scau2ics.config import (
+    ENCRYPTION_SALT,
+    PREFERRED_URL_SCHEME,
+    PRESET_FILTERS,
+    URL_EXPIRE_DAYS,
+    logger,
+)
 from scau2ics.ics import generate_ics
 from scau2ics.student import Student
 from scau2ics.utils import generate_semesters
@@ -163,11 +169,15 @@ def handle_generate_url():
             if expire_days is not None:
                 expire_days = int(expire_days)
         except (ValueError, TypeError):
-            return Response("expire_days必须是整数", status=400)
-
-        # 加密数据并构建URL
+            return Response("expire_days必须是整数", status=400)  # 加密数据并构建URL
         encrypted_token = encrypt_data(data, expire_days)
-        url = url_for("handle_generate_ics_get", token=encrypted_token, _external=True)
+        # 使用配置的协议方案生成URL
+        url = url_for(
+            "handle_generate_ics_get",
+            token=encrypted_token,
+            _external=True,
+            _scheme=PREFERRED_URL_SCHEME,
+        )
 
         # 构建响应
         response_data = {"url": url}

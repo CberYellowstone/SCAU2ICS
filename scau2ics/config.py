@@ -33,6 +33,9 @@ DISABLE_CACHE = False
 # 预置的过滤词字典，整数 -> 字符串
 PRESET_FILTERS = {0: "重修", 1: "免听", 2: "实验"}
 
+# URL生成配置
+PREFERRED_URL_SCHEME = "http"  # 生成URL时使用的协议
+
 # 日志配置
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
