@@ -4,9 +4,9 @@ ICS 生成模块 - 提供课表到ICS日历文件的转换功能
 
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
-from scau2ics.config import logger
+from scau2ics.config import PRESET_FILTERS, logger
 from scau2ics.student import CourseInfo, Student
 
 # ICS常量
@@ -23,13 +23,16 @@ ICS_FILE_FOOTER = ["END:VCALENDAR"]
 TIMEZONE = "Asia/Shanghai"
 
 
-def generate_ics(student: Student, semester: str) -> str:
+def generate_ics(
+    student: Student, semester: str, filters: Optional[List[Union[int, str]]] = None
+) -> str:
     """
     生成ICS日历文件字符串
 
     Args:
         student: 学生对象
         semester: 学期代码，必须提供
+        filters: 过滤关键词列表，可以是整数（预置过滤词索引）或字符串（自定义过滤词）
 
     Returns:
         ICS文件内容的字符串
@@ -53,8 +56,8 @@ def generate_ics(student: Student, semester: str) -> str:
     # 添加课表更新时间提示事件
     add_update_time_events(ics_content, cache_update_time)
 
-    # 添加课程事件
-    add_course_events(ics_content, courses_dict, first_monday, student)
+    # 添加课程事件，传递过滤器
+    add_course_events(ics_content, courses_dict, first_monday, student, filters)
 
     # 添加文件尾
     ics_content.extend(ICS_FILE_FOOTER)
@@ -99,6 +102,7 @@ def add_course_events(
     courses_dict: Dict[str, CourseInfo],
     first_monday: datetime,
     student: Student,
+    filters: Optional[List[Union[int, str]]] = None,
 ) -> None:
     """
     添加课程事件
@@ -108,8 +112,23 @@ def add_course_events(
         courses_dict: 课程信息字典
         first_monday: 第一周周一日期
         student: 学生对象（用于解析周次）
+        filters: 过滤关键词列表，可以是整数（预置过滤词索引）或字符串
     """
-    for _, course_info in courses_dict.items():
+    # 记录过滤的课程名称
+    filtered_courses = set()
+
+    for course_id, course_info in courses_dict.items():
+        # 准备事件信息
+        course_type = f"({course_info.course_type})" if course_info.course_type else ""
+        group_name = f"[{course_info.group_name}]" if course_info.group_name else ""
+
+        summary = f"{course_info.course_name}{course_type}{group_name}"
+
+        # 检查课程标题是否包含过滤关键词
+        if filters and should_filter_course(summary, filters):
+            filtered_courses.add(course_info.course_name)
+            continue
+
         # 解析排课周次
         weeks = student.parse_course_weeks(course_info.course_weeks)
 
@@ -122,14 +141,10 @@ def add_course_events(
             logger.warning(f"课程 {course_info.course_name} 的上课时间格式不正确")
             continue
 
-        # 准备事件信息
-        course_type = f"({course_info.course_type})" if course_info.course_type else ""
-        group_name = f"[{course_info.group_name}]" if course_info.group_name else ""
-
         event_props = {
-            "summary": f"{course_info.course_name}{course_type}{group_name}",
+            "summary": summary,
             "description": f"{course_info.teacher_name} | {course_info.class_name}",
-            "location": course_info.classroom,
+            "location": course_info.classroom or "-",
             "day_of_week": course_info.day_of_week,
             "start_hour": start_hour,
             "start_minute": start_minute,
@@ -146,6 +161,42 @@ def add_course_events(
                 end_week,
                 **event_props,
             )
+
+    # 如果有被过滤的课程，记录日志
+    if filtered_courses:
+        logger.info(f"已过滤掉以下课程: {', '.join(filtered_courses)}")
+
+
+def should_filter_course(summary: str, filters: List[Union[int, str]]) -> bool:
+    """
+    检查课程是否应该被过滤
+
+    Args:
+        summary: 完整的课程标题（包含课程名称、类型和分组）
+        filters: 过滤关键词列表，可以是整数（预置过滤词索引）或字符串
+
+    Returns:
+        如果课程应被过滤，返回True，否则返回False
+    """
+    if not filters:
+        return False
+
+    for filter_item in filters:
+        filter_word = ""
+
+        # 如果是整数，表示使用预置的过滤词
+        if isinstance(filter_item, int):
+            if filter_item in PRESET_FILTERS:
+                filter_word = PRESET_FILTERS[filter_item]
+        # 如果是字符串，直接使用
+        elif isinstance(filter_item, str):
+            filter_word = filter_item
+
+        # 检查课程标题是否包含过滤词
+        if filter_word and filter_word in summary:
+            return True
+
+    return False
 
 
 def create_course_event(

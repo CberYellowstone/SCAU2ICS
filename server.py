@@ -7,10 +7,11 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 from datetime import datetime
 from datetime import time as dt_time
 from datetime import timedelta
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 
 # 第三方库导入
 import cryptography
@@ -18,7 +19,7 @@ from cryptography.fernet import Fernet
 from flask import Flask, Response, render_template, request, url_for
 
 # 本地模块导入
-from scau2ics.config import ENCRYPTION_SALT, URL_EXPIRE_DAYS, logger
+from scau2ics.config import ENCRYPTION_SALT, PRESET_FILTERS, URL_EXPIRE_DAYS, logger
 from scau2ics.ics import generate_ics
 from scau2ics.student import Student
 from scau2ics.utils import generate_semesters
@@ -96,6 +97,11 @@ def _validate_request_data(data: Dict) -> Optional[Response]:
     if missing_fields:
         return Response(f"缺少必要参数: {', '.join(missing_fields)}", status=400)
 
+    if "filter_keywords" in data:
+        # 必须是列表
+        if not isinstance(data["filter_keywords"], list):
+            return Response("filter_keywords格式不正确", status=400)
+
     return None
 
 
@@ -105,8 +111,9 @@ def _extract_user_data(data: Dict) -> tuple:
     jwxt_password = data["jwxt_password"]
     sso_password = data.get("sso_password", "")
     semester = data["semester"]
+    filter_keywords = data.get("filter_keywords", [])
 
-    return (user_code, jwxt_password, sso_password, semester)
+    return (user_code, jwxt_password, sso_password, semester, filter_keywords)
 
 
 def _generate_ics_for_user(
@@ -114,6 +121,7 @@ def _generate_ics_for_user(
     jwxt_password: str,
     sso_password: str,
     semester: str,
+    filter_keywords: Optional[List[Union[int, str]]] = None,
     is_from_url: bool = False,
 ) -> Response:
     """为用户生成ICS文件，处理各种异常情况"""
@@ -122,7 +130,7 @@ def _generate_ics_for_user(
     try:
         # 尝试创建学生对象并生成ICS
         student = Student(user_code, jwxt_password, sso_password)
-        ics_content = generate_ics(student, semester)
+        ics_content = generate_ics(student, semester, filter_keywords)
         source = "加密URL" if is_from_url else "直接请求"
         logger.info(f"成功通过{source}为用户 {user_code} 生成ICS")
         return _create_ics_response(ics_content, user_code)
@@ -199,6 +207,18 @@ def handle_generate_ics():
         ):
             # 表单提交数据
             data = request.form.to_dict()
+
+            # 处理表单中的filter_keywords字段，如果是JSON字符串则解析
+            if "filter_keywords" in data:
+                try:
+                    data["filter_keywords"] = json.loads(data["filter_keywords"])
+                except json.JSONDecodeError:
+                    logger.error(
+                        f"无效的filter_keywords格式: {data['filter_keywords']}"
+                    )
+                    return Response(
+                        "无效的filter_keywords格式，请提供有效的JSON数组", status=400
+                    )
         else:
             return Response(
                 "不支持的Content-Type，请使用application/json或form表单提交", status=415
@@ -210,10 +230,14 @@ def handle_generate_ics():
             return validation_error
 
         # 提取用户相关信息
-        user_code, jwxt_password, sso_password, semester = _extract_user_data(data)
+        user_code, jwxt_password, sso_password, semester, filter_keywords = (
+            _extract_user_data(data)
+        )
 
-        # 生成ICS文件
-        return _generate_ics_for_user(user_code, jwxt_password, sso_password, semester)
+        # 生成ICS文件，传入过滤参数
+        return _generate_ics_for_user(
+            user_code, jwxt_password, sso_password, semester, filter_keywords
+        )
 
     except Exception as e:
         # 处理请求解析异常
@@ -237,7 +261,9 @@ def handle_generate_ics_get(token):
             return validation_error
 
         # 提取用户相关信息
-        user_code, jwxt_password, sso_password, semester = _extract_user_data(data)
+        user_code, jwxt_password, sso_password, semester, filter_keywords = (
+            _extract_user_data(data)
+        )
 
         # 生成ICS文件
         return _generate_ics_for_user(
@@ -245,6 +271,7 @@ def handle_generate_ics_get(token):
             jwxt_password,
             sso_password,
             semester,
+            filter_keywords,
             is_from_url=True,
         )
 
@@ -305,7 +332,10 @@ def _handle_generation_error(
 def index():
     """首页，提供简单的使用说明和表单"""
     return render_template(
-        "index.html", SEMESTERS=generate_semesters(), URL_EXPIRE_DAYS=URL_EXPIRE_DAYS
+        "index.html",
+        SEMESTERS=generate_semesters(),
+        URL_EXPIRE_DAYS=URL_EXPIRE_DAYS,
+        PRESET_FILTERS=PRESET_FILTERS,
     )
 
 

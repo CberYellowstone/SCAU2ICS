@@ -22,6 +22,9 @@ JWXT_URL_BACKUP = "https://jwxt-scau-edu-cn-s.vpn.scau.edu.cn"
 ENCRYPTION_SALT = "SCAU2ICS_SALT_FOR_SECURE_URLS"  # 用于URL加密的盐值
 URL_EXPIRE_DAYS = 30  # URL有效期（天）
 
+# 预置的过滤词字典，整数 -> 字符串
+PRESET_FILTERS = {0: "重修", 1: "免听", 2: "实验"}
+
 # 日志配置
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
